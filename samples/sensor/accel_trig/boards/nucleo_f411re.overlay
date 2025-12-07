@@ -1,0 +1,25 @@
+/*
+ * Copyright (c) 2025, Stefan Schmidt.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <zephyr/dt-bindings/sensor/adxl345.h>
+
+/ {
+	aliases {
+		accel0 = &adxl345;
+	};
+};
+
+&i2c1 {
+	pinctrl-0 = <&i2c1_scl_pb8 &i2c1_sda_pb9>;
+	pinctrl-names = "default";
+	status = "okay";
+	clock-frequency = <I2C_BITRATE_FAST>;
+	adxl345: adxl345@53 {
+		compatible = "adi,adxl345";
+		reg = <0x53>;
+		int1-gpios = <&gpioc 8 GPIO_ACTIVE_HIGH>; /* C8 */
+	};
+};
