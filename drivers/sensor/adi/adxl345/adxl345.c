@@ -504,6 +504,18 @@ static int adxl345_init(const struct device *dev)
 	return 0;
 }
 
+#ifdef ZTEST_UNITTEST
+struct sensor_driver_api *unit_test_get_device_api(void)
+{
+	return &adxl345_api_funcs;
+}
+
+int unit_test_invoke_adxl345_init(const struct device *dev)
+{
+	return adxl345_init(dev);
+}
+#endif
+
 #ifdef CONFIG_PM_DEVICE
 static int adxl345_pm_action(const struct device *dev,
 			     enum pm_device_action action)
