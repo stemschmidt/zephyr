@@ -17,8 +17,8 @@ include:
 properties:
   input-voltage-microvolt:
     type: int
-    min: 2700
-    max: 6000
+    min: 2700000
+    max: 6000000
     required: true
     description: |
       Provide the input voltage to the device in order to calculate the

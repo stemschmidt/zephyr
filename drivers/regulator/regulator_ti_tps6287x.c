@@ -30,6 +30,7 @@ struct regulator_tps62873_data {
 struct regulator_tps6287x_config {
 	struct regulator_common_config common;
 	struct i2c_dt_spec i2c;
+	uint32_t input_voltage_uv;
 };
 
 static unsigned int regulator_tps6287x_count_voltages(const struct device *dev)
@@ -116,6 +117,7 @@ static DEVICE_API(regulator, api) = {
 	static const struct regulator_tps6287x_config config_##inst = { \
 		.common = REGULATOR_DT_INST_COMMON_CONFIG_INIT(inst), \
 		.i2c = I2C_DT_SPEC_INST_GET(inst), \
+        .input_voltage_uv = DT_INST_PROP(inst, input_voltage_microvolt) \
 	};                                               \
                                                      \
 	DEVICE_DT_INST_DEFINE(inst, regulator_tps6287x_init, NULL, &data_##inst, &config_##inst, \
