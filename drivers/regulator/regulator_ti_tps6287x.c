@@ -194,7 +194,25 @@ static int regulator_tps6287x_disable(const struct device *dev)
 
 static int regulator_tps6287x_init(const struct device *dev)
 {
-	return 0;
+	const struct regulator_tps6287x_config *cfg = dev->config;
+	bool is_enabled = false;
+	int rc = 0;
+	uint8_t status;
+
+	rc = i2c_reg_read_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, &status);
+	if (rc < 0) {
+		return rc;
+	}
+
+	is_enabled = (status & 0x20) != 0;
+
+	regulator_common_data_init(dev);
+
+	rc = regulator_common_init(dev, is_enabled);
+	if (rc < 0) {
+		LOG_ERR("%s: Failed to initialize regulator: %d", dev->name, rc);
+	}
+	return rc;
 }
 
 static DEVICE_API(regulator, api) = {
@@ -209,7 +227,13 @@ static DEVICE_API(regulator, api) = {
 };
 
 /* clang-format off */
+#define SANITY_CHECK_INIT_MICROVOLT(inst) \
+	BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), regulator_init_microvolt, INT32_MIN) < (DT_INST_PROP(inst, input_voltage_microvolt) - 1400000),  \
+		     "input-voltage-microvolt must be at least 1.4V greater than regulator-init-microvolt")
+
 #define REGULATOR_TPS6287X_DEFINE_ALL(inst) \
+	SANITY_CHECK_INIT_MICROVOLT(inst); \
+	\
 	static struct regulator_tps62873_data data_##inst; \
                                                         \
 	static const struct regulator_tps6287x_config config_##inst = { \
