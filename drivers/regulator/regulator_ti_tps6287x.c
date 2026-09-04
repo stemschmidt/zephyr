@@ -10,7 +10,6 @@
 
 #define DT_DRV_COMPAT ti_tps62873
 
-#include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/regulator.h>
 #include <zephyr/logging/log.h>
@@ -20,11 +19,105 @@
 
 LOG_MODULE_REGISTER(tps6287x, CONFIG_REGULATOR_LOG_LEVEL);
 
+#define TPS6287X_REG_VSET 0x00U /* Output voltage setpoint, Reset = X */
+
+#define TPS6287X_VSET_MASK GENMASK(7, 0)
+
+#define TPS6287X_REG_CONTROL1 0x01U /* Control 1, Reset = 0x2A */
+
+#define TPS6287X_CONTROL1_RESET      BIT(7)
+#define TPS6287X_CONTROL1_SSCEN      BIT(6)
+#define TPS6287X_CONTROL1_SWEN       BIT(5)
+#define TPS6287X_CONTROL1_FPWMEN     BIT(4)
+#define TPS6287X_CONTROL1_DISCHEN    BIT(3)
+#define TPS6287X_CONTROL1_HICCUPEN   BIT(2)
+#define TPS6287X_CONTROL1_VRAMP_MASK GENMASK(1, 0)
+
+/* RESET (bit 7) */
+#define TPS6287X_RESET_NO_EFFECT 0x0U
+#define TPS6287X_RESET_ALL_REGS  0x1U /* Resets all registers to default. Read-back is always 0 */
+
+/* SSCEN (bit 6) - Spread spectrum clocking enable */
+#define TPS6287X_SSCEN_DISABLED 0x0U
+#define TPS6287X_SSCEN_ENABLED  0x1U
+
+/* SWEN (bit 5) - Software enable */
+#define TPS6287X_SWEN_DISABLED 0x0U /* Switching disabled, register values retained */
+#define TPS6287X_SWEN_ENABLED  0x1U /* Switching enabled (without the enable delay)  */
+
+/* FPWMEN (bit 4) - Forced PWM enable (logically ORed with MODE/SYNC pin) */
+#define TPS6287X_FPWMEN_POWER_SAVE 0x0U
+#define TPS6287X_FPWMEN_FORCED_PWM 0x1U
+
+/* DISCHEN (bit 3) - Output discharge enable */
+#define TPS6287X_DISCHEN_DISABLED 0x0U
+#define TPS6287X_DISCHEN_ENABLED  0x1U
+
+/* HICCUPEN (bit 2) - Hiccup operation enable. Do not enable during stacked operation. */
+#define TPS6287X_HICCUPEN_DISABLED 0x0U
+#define TPS6287X_HICCUPEN_ENABLED  0x1U
+
+/* VRAMP (bits 1-0) - Output voltage ramp speed */
+#define TPS6287X_VRAMP_10000_UV_PER_US 0x0U
+#define TPS6287X_VRAMP_5000_UV_PER_US  0x1U
+#define TPS6287X_VRAMP_1250_UV_PER_US  0x2U
+#define TPS6287X_VRAMP_500_UV_PER_US   0x3U
+
+#define TPS6287X_VSET_RANGE1_BASE_UV 400000 /* 0.400 V */
+#define TPS6287X_VSET_RANGE1_STEP_UV 1250   /* 1.25 mV/step  (0.400 V - 0.71875 V) */
+#define TPS6287X_VSET_RANGE2_BASE_UV 400000 /* 0.400 V */
+#define TPS6287X_VSET_RANGE2_STEP_UV 2500   /* 2.5 mV/step   (0.400 V - 1.0375 V)  */
+#define TPS6287X_VSET_RANGE3_BASE_UV 400000 /* 0.400 V */
+#define TPS6287X_VSET_RANGE3_STEP_UV 5000   /* 5 mV/step     (0.400 V - 1.675 V)   */
+#define TPS6287X_VSET_RANGE4_BASE_UV 800000 /* 0.800 V */
+#define TPS6287X_VSET_RANGE4_STEP_UV 10000  /* 10 mV/step    (0.800 V - 3.35 V)    */
+
+#define TPS6287X_REG_CONTROL2 0x02U /* Control 2, Reset = 0x09 */
+
+#define TPS6287X_CONTROL2_RESERVED_MASK GENMASK(7, 4)
+#define TPS6287X_CONTROL2_VRANGE_MASK   GENMASK(3, 2)
+#define TPS6287X_CONTROL2_SSTIME_MASK   GENMASK(1, 0)
+
+/* VRANGE (bits 3-2) - Output voltage range, applies to VSET register */
+#define TPS6287X_VRANGE_1_400MV_TO_719MV_STEP_1P25MV 0x0U
+#define TPS6287X_VRANGE_2_400MV_TO_1038MV_STEP_2P5MV 0x1U
+#define TPS6287X_VRANGE_3_400MV_TO_1675MV_STEP_5MV   0x2U
+#define TPS6287X_VRANGE_4_800MV_TO_3350MV_STEP_10MV  0x3U
+
+/* SSTIME (bits 1-0) - Soft-start ramp time */
+#define TPS6287X_SSTIME_0_5_MS 0x0U
+#define TPS6287X_SSTIME_1_MS   0x1U
+#define TPS6287X_SSTIME_2_MS   0x2U
+#define TPS6287X_SSTIME_4_MS   0x3U
+
+#define TPS6287X_REG_CONTROL3 0x03U /* Control 3, Reset = 0x00 */
+
+#define TPS6287X_CONTROL3_RESERVED_MASK GENMASK(7, 2)
+#define TPS6287X_CONTROL3_SINGLE        BIT(1)
+#define TPS6287X_CONTROL3_PGBLNKDVS     BIT(0)
+
+/* SINGLE (bit 1) - Controls internal EN pulldown and SYNC_OUT */
+#define TPS6287X_SINGLE_EN_PULLDOWN_SYNCOUT_ENABLED  0x0U
+#define TPS6287X_SINGLE_EN_PULLDOWN_SYNCOUT_DISABLED 0x1U
+
+/* PGBLNKDVS (bit 0) - Power-good blanking during DVS */
+#define TPS6287X_PGBLNKDVS_PG_REFLECTS_COMPARATOR 0x0U
+#define TPS6287X_PGBLNKDVS_PG_HIGH_Z_DURING_DVS   0x1U
+
+#define TPS6287X_REG_STATUS 0x04U /* Status, Reset = 0x02 */
+
+#define TPS6287X_STATUS_RESERVED_MASK GENMASK(7, 6)
+#define TPS6287X_STATUS_HICCUP        BIT(5) /* Hiccup event occurred since last read */
+#define TPS6287X_STATUS_ILIM          BIT(4) /* Current limit event occurred since last read */
+#define TPS6287X_STATUS_TWARN         BIT(3) /* Thermal warning event occurred since last read */
+#define TPS6287X_STATUS_TSHUT         BIT(2) /* Thermal shutdown event occurred since last read */
+#define TPS6287X_STATUS_PBUV BIT(1) /* Power-bad undervolt. event occurred since last read */
+#define TPS6287X_STATUS_PBOV BIT(0) /* Power-bad overvoltage event occurred since last read */
+
 struct regulator_tps62873_data {
 	struct regulator_common_data data;
 	int32_t min_uv;
 	int32_t max_uv;
-	bool active_discharge;
 };
 
 struct regulator_tps6287x_config {
@@ -66,20 +159,25 @@ static int regulator_tps6287x_get_voltage(const struct device *dev, int32_t *vol
 
 static int regulator_tps6287x_set_active_discharge(const struct device *dev, bool active_discharge)
 {
-	struct regulator_tps62873_data *data = (struct regulator_tps62873_data *)dev->data;
-	data->active_discharge = active_discharge;
-	LOG_INF("regulator_tps6287x_set_active_discharge %s", active_discharge ? "on" : "off");
-	return 0;
+	const struct regulator_tps6287x_config *config = dev->config;
+
+	return i2c_reg_update_byte_dt(&config->i2c, TPS6287X_REG_CONTROL1,
+				      TPS6287X_CONTROL1_DISCHEN,
+				      active_discharge ? TPS6287X_CONTROL1_DISCHEN : 0);
 }
 
 static int regulator_tps6287x_get_active_discharge(const struct device *dev, bool *active_discharge)
 {
-	struct regulator_tps62873_data *data = (struct regulator_tps62873_data *)dev->data;
+	const struct regulator_tps6287x_config *config = dev->config;
+	uint8_t control1;
+	int rc;
 
-	LOG_INF("regulator_tps6287x_get_active_discharge %s",
-		data->active_discharge ? "on" : "off");
-	*active_discharge = data->active_discharge;
-	return 0;
+	rc = i2c_reg_read_byte_dt(&config->i2c, TPS6287X_REG_CONTROL1, &control1);
+	if (rc == 0) {
+		*active_discharge = control1 & TPS6287X_CONTROL1_DISCHEN;
+	}
+
+	return rc;
 }
 
 static int regulator_tps6287x_enable(const struct device *dev)
