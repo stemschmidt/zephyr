@@ -19,6 +19,8 @@
 
 LOG_MODULE_REGISTER(tps6287x, CONFIG_REGULATOR_LOG_LEVEL);
 
+#define TPS6287x_MIN_DIV_OUTPUT 1400000U /* Minimum difference between in- and output voltage. */
+
 #define TPS6287X_REG_VSET 0x00U /* Output voltage setpoint, Reset = X */
 
 #define TPS6287X_VSET_MASK GENMASK(7, 0)
@@ -126,6 +128,13 @@ struct regulator_tps6287x_config {
 	uint32_t input_voltage_uv;
 };
 
+static const struct linear_range voltage_ranges[] = {
+	LINEAR_RANGE_INIT(400000u, 1250u, 0, BIT_MASK(8)),
+	LINEAR_RANGE_INIT(400000u, 2500u, 0, BIT_MASK(8)),
+	LINEAR_RANGE_INIT(400000u, 5000u, 0, BIT_MASK(8)),
+	LINEAR_RANGE_INIT(800000u, 10000u, 0, BIT_MASK(8)),
+};
+
 static unsigned int regulator_tps6287x_count_voltages(const struct device *dev)
 {
 	LOG_INF("regulator_tps6287x_count_voltages, return 10");
@@ -142,37 +151,100 @@ static int regulator_tps6287x_list_voltage(const struct device *dev, unsigned in
 
 static int regulator_tps6287x_set_voltage(const struct device *dev, int32_t min_uv, int32_t max_uv)
 {
-	struct regulator_tps62873_data *data = (struct regulator_tps62873_data *)dev->data;
-	data->min_uv = min_uv;
-	data->max_uv = max_uv;
-	LOG_INF("regulator_tps6287x_set_voltage: min_uv %d, max_uv: %d", min_uv, max_uv);
-	return 0;
+	const struct regulator_tps6287x_config *cfg =
+		(const struct regulator_tps6287x_config *)dev->config;
+	int rc = 0;
+	uint8_t control2 = 0;
+
+	if ((min_uv + TPS6287x_MIN_DIV_OUTPUT) > cfg->input_voltage_uv ||
+	    (max_uv + TPS6287x_MIN_DIV_OUTPUT) > cfg->input_voltage_uv) {
+		return -EINVAL;
+	}
+
+	rc = i2c_reg_read_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL2, &control2);
+	if (rc < 0) {
+		return rc;
+	}
+
+	uint8_t vrange = FIELD_GET(TPS6287X_CONTROL2_VRANGE_MASK, control2);
+	uint16_t idx = 0;
+
+	rc = linear_range_get_win_index(&voltage_ranges[vrange], min_uv, max_uv, &idx);
+
+	/* If we cannot find a matching voltage in the current range, check the other ranges */
+	if (rc < 0) {
+		vrange = ARRAY_SIZE(voltage_ranges);
+		/* We start with the highest voltage range and work our way down */
+		do {
+			vrange--;
+
+			rc = linear_range_get_win_index(&voltage_ranges[vrange], min_uv, max_uv,
+							&idx);
+		} while ((rc < 0) && (vrange > 0U));
+
+		if (rc < 0) {
+			return rc;
+		}
+
+		if (vrange == 3U) {
+			LOG_ERR("Switch to 0.8 Setpoint not yet implemented!");
+			return -EINVAL;
+		}
+
+		control2 = FIELD_PREP(TPS6287X_CONTROL2_VRANGE_MASK, vrange);
+		rc = i2c_reg_write_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL2, control2);
+		if (rc < 0) {
+			return rc;
+		}
+	}
+
+	LOG_INF("%s: Setting voltage to range %u, index %u", dev->name, vrange, idx);
+
+	return i2c_reg_write_byte_dt(&cfg->i2c, TPS6287X_REG_VSET, (uint8_t)idx);
 }
 
 static int regulator_tps6287x_get_voltage(const struct device *dev, int32_t *volt_uv)
 {
-	struct regulator_tps62873_data *data = (struct regulator_tps62873_data *)dev->data;
-	LOG_INF("regulator_tps6287x_get_voltage: %d", data->min_uv);
-	*volt_uv = data->min_uv;
-	return 0;
+	const struct regulator_tps6287x_config *cfg =
+		(const struct regulator_tps6287x_config *)dev->config;
+	int rc = 0;
+	uint8_t control2 = 0;
+
+	rc = i2c_reg_read_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL2, &control2);
+	if (rc < 0) {
+		return rc;
+	}
+
+	uint8_t vrange = FIELD_GET(TPS6287X_CONTROL2_VRANGE_MASK, control2);
+	uint8_t idx = 0;
+
+	rc = i2c_reg_read_byte_dt(&cfg->i2c, TPS6287X_REG_VSET, &idx);
+	if (rc < 0) {
+		return rc;
+	}
+
+	rc = linear_range_get_value(&voltage_ranges[vrange], (uint16_t)idx, volt_uv);
+
+	LOG_INF("%s: Got voltage: %d uV (range %u, index %u)", dev->name, *volt_uv, vrange, idx);
+
+	return rc;
 }
 
 static int regulator_tps6287x_set_active_discharge(const struct device *dev, bool active_discharge)
 {
-	const struct regulator_tps6287x_config *config = dev->config;
+	const struct regulator_tps6287x_config *cfg = dev->config;
 
-	return i2c_reg_update_byte_dt(&config->i2c, TPS6287X_REG_CONTROL1,
-				      TPS6287X_CONTROL1_DISCHEN,
+	return i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, TPS6287X_CONTROL1_DISCHEN,
 				      active_discharge ? TPS6287X_CONTROL1_DISCHEN : 0);
 }
 
 static int regulator_tps6287x_get_active_discharge(const struct device *dev, bool *active_discharge)
 {
-	const struct regulator_tps6287x_config *config = dev->config;
+	const struct regulator_tps6287x_config *cfg = dev->config;
 	uint8_t control1;
 	int rc;
 
-	rc = i2c_reg_read_byte_dt(&config->i2c, TPS6287X_REG_CONTROL1, &control1);
+	rc = i2c_reg_read_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, &control1);
 	if (rc == 0) {
 		*active_discharge = control1 & TPS6287X_CONTROL1_DISCHEN;
 	}
@@ -208,6 +280,10 @@ static int regulator_tps6287x_init(const struct device *dev)
 
 	regulator_common_data_init(dev);
 
+	/* TO BE REMOVED!!!! */
+	i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, 0x80, 0x80);
+	k_sleep(K_MSEC(1));
+
 	rc = regulator_common_init(dev, is_enabled);
 	if (rc < 0) {
 		LOG_ERR("%s: Failed to initialize regulator: %d", dev->name, rc);
@@ -228,7 +304,8 @@ static DEVICE_API(regulator, api) = {
 
 /* clang-format off */
 #define SANITY_CHECK_INIT_MICROVOLT(inst) \
-	BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), regulator_init_microvolt, INT32_MIN) < (DT_INST_PROP(inst, input_voltage_microvolt) - 1400000),  \
+	BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), regulator_init_microvolt, INT32_MIN) < \
+				(DT_INST_PROP(inst, input_voltage_microvolt) - TPS6287x_MIN_DIV_OUTPUT),  \
 		     "input-voltage-microvolt must be at least 1.4V greater than regulator-init-microvolt")
 
 #define REGULATOR_TPS6287X_DEFINE_ALL(inst) \
