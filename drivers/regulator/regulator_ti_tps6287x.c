@@ -15,6 +15,7 @@
 LOG_MODULE_REGISTER(tps6287x, CONFIG_REGULATOR_LOG_LEVEL);
 
 #define TPS6287x_MIN_DIV_OUTPUT 1400000U /* Minimum difference between in- and output voltage. */
+#define TPS6287x_MAX_INIT_RETRY 5U       /* Maximum retries during init (500µs) */
 
 #define TPS6287X_REG_VSET 0x00U /* Output voltage setpoint, Reset = X */
 
@@ -122,7 +123,9 @@ struct regulator_tps6287x_config {
 	struct regulator_common_config common;
 	struct i2c_dt_spec i2c;
 	uint32_t input_voltage_uv;
+	uint8_t ramp_delay;
 	bool ssc;
+	bool hiccup;
 };
 
 static const struct linear_range voltage_ranges[] = {
@@ -251,42 +254,81 @@ static int regulator_tps6287x_get_active_discharge(const struct device *dev, boo
 
 static int regulator_tps6287x_enable(const struct device *dev)
 {
-	LOG_INF("regulator_tps6287x_enable");
-	return 0;
+	const struct regulator_tps6287x_config *cfg = dev->config;
+	int rc = 0;
+
+	rc = i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, TPS6287X_CONTROL1_SWEN,
+				    FIELD_PREP(TPS6287X_CONTROL1_SWEN, TPS6287X_SWEN_ENABLED));
+	if (rc == 0) {
+		struct regulator_tps62873_data *data = (struct regulator_tps62873_data *)dev->data;
+		data->is_enabled = true;
+	}
+	return rc;
 }
 
 static int regulator_tps6287x_disable(const struct device *dev)
 {
-	LOG_INF("regulator_tps6287x_disable");
-	return 0;
+	const struct regulator_tps6287x_config *cfg = dev->config;
+	int rc = 0;
+
+	rc = i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, TPS6287X_CONTROL1_SWEN,
+				    FIELD_PREP(TPS6287X_CONTROL1_SWEN, TPS6287X_SWEN_DISABLED));
+	if (rc == 0) {
+		struct regulator_tps62873_data *data = (struct regulator_tps62873_data *)dev->data;
+		data->is_enabled = false;
+	}
+	return rc;
 }
 
 static int regulator_tps6287x_init(const struct device *dev)
 {
 	const struct regulator_tps6287x_config *cfg = dev->config;
-	struct regulator_tps62873_data *data = (struct regulator_tps62873_data *)dev->data;
-	int rc = 0;
-	uint8_t status;
+	int rc = -1;
+	uint8_t status = 0;
 
-	regulator_common_data_init(dev);
+	/* Try to access device. */
+	for (int i = 0; i < TPS6287x_MAX_INIT_RETRY && rc != 0; i++) {
+		rc = i2c_reg_read_byte_dt(&cfg->i2c, TPS6287X_REG_STATUS, &status);
+		if (rc < 0) {
+			k_busy_wait(100);
+		}
+	}
 
-	rc = i2c_reg_read_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, &status);
 	if (rc < 0) {
 		return rc;
 	}
 
-	data->is_enabled = FIELD_GET(TPS6287X_CONTROL1_SWEN, status);
+	/* Access successful, continue with initialization. */
+	regulator_common_data_init(dev);
 
 	/* Reset register. */
-	i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, 0x80, 0x80);
-	k_busy_wait(100);
-	rc = regulator_common_init(dev, data->is_enabled);
+	rc = i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, TPS6287X_CONTROL1_RESET,
+				    FIELD_PREP(TPS6287X_CONTROL1_RESET, TPS6287X_RESET_ALL_REGS));
 	if (rc < 0) {
-		LOG_ERR("%s: Failed to initialize regulator: %d", dev->name, rc);
+		return rc;
+	}
+	k_busy_wait(100);
+
+	/* Disable output. */
+	rc = regulator_tps6287x_disable(dev);
+	if (rc < 0) {
+		return rc;
 	}
 
-	rc = i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, TPS6287X_CONTROL1_SSCEN,
-				    FIELD_PREP(TPS6287X_CONTROL1_SSCEN, cfg->ssc));
+	/* Configure non-common properties. */
+	uint8_t control1 = 0;
+
+	control1 = FIELD_PREP(TPS6287X_CONTROL1_SSCEN, cfg->ssc);
+	control1 |= FIELD_PREP(TPS6287X_CONTROL1_HICCUPEN, cfg->hiccup);
+	control1 |= FIELD_PREP(TPS6287X_CONTROL1_VRAMP_MASK, cfg->ramp_delay);
+	rc = i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1,
+				    TPS6287X_CONTROL1_SSCEN | TPS6287X_CONTROL1_HICCUPEN, control1);
+
+	rc = regulator_common_init(dev, false);
+	if (rc < 0) {
+		LOG_ERR("%s: Failed to initialize regulator: %d", dev->name, rc);
+		return rc;
+	}
 
 	uint8_t check = 0;
 
@@ -321,7 +363,9 @@ static DEVICE_API(regulator, api) = {
 		.common = REGULATOR_DT_INST_COMMON_CONFIG_INIT(inst), \
 		.i2c = I2C_DT_SPEC_INST_GET(inst), \
         .input_voltage_uv = DT_INST_PROP(inst, input_voltage_microvolt), \
-        .ssc = DT_INST_PROP(inst, enable_ssc) \
+        .ramp_delay = DT_INST_ENUM_IDX(inst, regulator_ramp_delay), \
+        .ssc = DT_INST_PROP(inst, enable_ssc), \
+        .hiccup = DT_INST_PROP(inst, enable_hiccup_mode) \
 	};                                               \
                                                      \
 	DEVICE_DT_INST_DEFINE(inst, regulator_tps6287x_init, NULL, &data_##inst, &config_##inst, \

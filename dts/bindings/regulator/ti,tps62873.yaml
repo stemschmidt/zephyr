@@ -13,6 +13,8 @@ include:
       - regulator-min-microvolt
       - regulator-max-microvolt
       - regulator-ramp-delay
+      - regulator-always-on
+      - regulator-boot-on
       - regulator-initial-mode
       - regulator-allowed-modes
       - regulator-active-discharge
