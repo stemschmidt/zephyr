@@ -30,6 +30,7 @@ properties:
       maximum output voltage. For proper operation, the input voltage
       needs to be at least 1.4V above the selected output voltage
 
+# Keep the order of the enums, the driver relies on it!
   regulator-ramp-delay:
     type: int
     default: 1250

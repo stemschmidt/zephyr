@@ -15,8 +15,8 @@
 
 LOG_MODULE_REGISTER(tps6287x, CONFIG_REGULATOR_LOG_LEVEL);
 
-#define TPS6287x_MIN_DIV_OUTPUT 1400000U /* Minimum difference between in- and output voltage. */
-#define TPS6287x_MAX_INIT_RETRY 5U       /* Maximum retries during init (500µs) */
+#define TPS6287X_MIN_DIV_OUTPUT 1400000U /* Minimum difference between in- and output voltage. */
+#define TPS6287X_MAX_INIT_RETRY 5U       /* Maximum retries during init (500µs) */
 
 #define TPS6287X_REG_VSET 0x00U /* Output voltage setpoint, Reset = X */
 
@@ -113,10 +113,8 @@ LOG_MODULE_REGISTER(tps6287x, CONFIG_REGULATOR_LOG_LEVEL);
 #define TPS6287X_STATUS_PBUV BIT(1) /* Power-bad undervolt. event occurred since last read */
 #define TPS6287X_STATUS_PBOV BIT(0) /* Power-bad overvoltage event occurred since last read */
 
-struct regulator_tps62873_data {
+struct regulator_tps6287x_data {
 	struct regulator_common_data data;
-	int32_t min_uv;
-	int32_t max_uv;
 	bool is_enabled;
 };
 
@@ -127,7 +125,6 @@ struct regulator_tps6287x_config {
 	uint8_t ramp_delay;
 	bool ssc;
 	bool hiccup;
-	uint8_t initial_mode;
 };
 
 static const struct linear_range voltage_ranges[] = {
@@ -158,8 +155,8 @@ static int regulator_tps6287x_set_voltage(const struct device *dev, int32_t min_
 	int rc = 0;
 	uint8_t control2 = 0;
 
-	if ((min_uv + TPS6287x_MIN_DIV_OUTPUT) > cfg->input_voltage_uv ||
-	    (max_uv + TPS6287x_MIN_DIV_OUTPUT) > cfg->input_voltage_uv) {
+	if ((min_uv + TPS6287X_MIN_DIV_OUTPUT) > cfg->input_voltage_uv ||
+	    (max_uv + TPS6287X_MIN_DIV_OUTPUT) > cfg->input_voltage_uv) {
 		return -EINVAL;
 	}
 
@@ -257,7 +254,7 @@ static int regulator_tps6287x_get_active_discharge(const struct device *dev, boo
 static int regulator_tps6287x_set_mode(const struct device *dev, regulator_mode_t mode)
 {
 	const struct regulator_tps6287x_config *cfg = dev->config;
-	bool enable_forced_pwm = (bool)mode & TI_TPS6287X_MODE_PWM;
+	bool enable_forced_pwm = (mode & TI_TPS6287X_MODE_PWM) != 0;
 
 	return i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, TPS6287X_CONTROL1_FPWMEN,
 				      FIELD_PREP(TPS6287X_CONTROL1_FPWMEN, enable_forced_pwm));
@@ -288,7 +285,7 @@ static int regulator_tps6287x_enable(const struct device *dev)
 	rc = i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, TPS6287X_CONTROL1_SWEN,
 				    FIELD_PREP(TPS6287X_CONTROL1_SWEN, TPS6287X_SWEN_ENABLED));
 	if (rc == 0) {
-		struct regulator_tps62873_data *data = (struct regulator_tps62873_data *)dev->data;
+		struct regulator_tps6287x_data *data = (struct regulator_tps6287x_data *)dev->data;
 		data->is_enabled = true;
 	}
 	return rc;
@@ -302,7 +299,7 @@ static int regulator_tps6287x_disable(const struct device *dev)
 	rc = i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, TPS6287X_CONTROL1_SWEN,
 				    FIELD_PREP(TPS6287X_CONTROL1_SWEN, TPS6287X_SWEN_DISABLED));
 	if (rc == 0) {
-		struct regulator_tps62873_data *data = (struct regulator_tps62873_data *)dev->data;
+		struct regulator_tps6287x_data *data = (struct regulator_tps6287x_data *)dev->data;
 		data->is_enabled = false;
 	}
 	return rc;
@@ -315,7 +312,7 @@ static int regulator_tps6287x_init(const struct device *dev)
 	uint8_t status = 0;
 
 	/* Try to access device. */
-	for (int i = 0; i < TPS6287x_MAX_INIT_RETRY && rc != 0; i++) {
+	for (int i = 0; i < TPS6287X_MAX_INIT_RETRY && rc != 0; i++) {
 		rc = i2c_reg_read_byte_dt(&cfg->i2c, TPS6287X_REG_STATUS, &status);
 		if (rc < 0) {
 			k_busy_wait(100);
@@ -350,11 +347,15 @@ static int regulator_tps6287x_init(const struct device *dev)
 	control1 |= FIELD_PREP(TPS6287X_CONTROL1_HICCUPEN, cfg->hiccup);
 	control1 |= FIELD_PREP(TPS6287X_CONTROL1_VRAMP_MASK, cfg->ramp_delay);
 	rc = i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1,
-				    TPS6287X_CONTROL1_SSCEN | TPS6287X_CONTROL1_HICCUPEN, control1);
+				    TPS6287X_CONTROL1_SSCEN | TPS6287X_CONTROL1_HICCUPEN |
+					    TPS6287X_CONTROL1_VRAMP_MASK,
+				    control1);
+	if (rc < 0) {
+		return rc;
+	}
 
 	rc = regulator_common_init(dev, false);
 	if (rc < 0) {
-		LOG_ERR("%s: Failed to initialize regulator: %d", dev->name, rc);
 		return rc;
 	}
 
@@ -381,14 +382,16 @@ static DEVICE_API(regulator, api) = {
 
 /* clang-format off */
 #define SANITY_CHECK_INIT_MICROVOLT(inst) \
+	BUILD_ASSERT(DT_PROP(DT_DRV_INST(inst), input_voltage_microvolt) >= TPS6287X_MIN_DIV_OUTPUT, \
+		     "input-voltage-microvolt must be at least 1.4V"); \
 	BUILD_ASSERT(DT_PROP_OR(DT_DRV_INST(inst), regulator_init_microvolt, INT32_MIN) < \
-				(DT_INST_PROP(inst, input_voltage_microvolt) - TPS6287x_MIN_DIV_OUTPUT),  \
+				(DT_INST_PROP(inst, input_voltage_microvolt) - TPS6287X_MIN_DIV_OUTPUT),  \
 		     "input-voltage-microvolt must be at least 1.4V greater than regulator-init-microvolt")
 
 #define REGULATOR_TPS6287X_DEFINE_ALL(inst) \
 	SANITY_CHECK_INIT_MICROVOLT(inst); \
 	\
-	static struct regulator_tps62873_data data_##inst; \
+	static struct regulator_tps6287x_data data_##inst; \
                                                         \
 	static const struct regulator_tps6287x_config config_##inst = { \
 		.common = REGULATOR_DT_INST_COMMON_CONFIG_INIT(inst), \
