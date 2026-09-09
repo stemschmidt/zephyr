@@ -11,6 +11,7 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/linear_range.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/dt-bindings/regulator/ti_tps6287x.h>
 
 LOG_MODULE_REGISTER(tps6287x, CONFIG_REGULATOR_LOG_LEVEL);
 
@@ -126,6 +127,7 @@ struct regulator_tps6287x_config {
 	uint8_t ramp_delay;
 	bool ssc;
 	bool hiccup;
+	uint8_t initial_mode;
 };
 
 static const struct linear_range voltage_ranges[] = {
@@ -252,6 +254,32 @@ static int regulator_tps6287x_get_active_discharge(const struct device *dev, boo
 	return rc;
 }
 
+static int regulator_tps6287x_set_mode(const struct device *dev, regulator_mode_t mode)
+{
+	const struct regulator_tps6287x_config *cfg = dev->config;
+	bool enable_forced_pwm = (bool)mode & TI_TPS6287X_MODE_PWM;
+
+	return i2c_reg_update_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, TPS6287X_CONTROL1_FPWMEN,
+				      FIELD_PREP(TPS6287X_CONTROL1_FPWMEN, enable_forced_pwm));
+}
+
+static int regulator_tps6287x_get_mode(const struct device *dev, regulator_mode_t *mode)
+{
+	const struct regulator_tps6287x_config *cfg = dev->config;
+	uint8_t control1 = 0;
+	int rc = 0;
+
+	rc = i2c_reg_read_byte_dt(&cfg->i2c, TPS6287X_REG_CONTROL1, &control1);
+	if (rc < 0) {
+		return rc;
+	}
+
+	*mode = (FIELD_GET(TPS6287X_CONTROL1_FPWMEN, control1) ? TI_TPS6287X_MODE_PWM
+							       : TI_TPS6287X_MODE_PFM);
+
+	return 0;
+}
+
 static int regulator_tps6287x_enable(const struct device *dev)
 {
 	const struct regulator_tps6287x_config *cfg = dev->config;
@@ -346,6 +374,9 @@ static DEVICE_API(regulator, api) = {
 	.get_voltage = regulator_tps6287x_get_voltage,
 	.set_active_discharge = regulator_tps6287x_set_active_discharge,
 	.get_active_discharge = regulator_tps6287x_get_active_discharge,
+	.set_mode = regulator_tps6287x_set_mode,
+	.get_mode = regulator_tps6287x_get_mode,
+
 };
 
 /* clang-format off */
