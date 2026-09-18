@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Carl Zeiss Meditec AG
+# SPDX-License-Identifier: Apache-2.0
+
+config TSL2522
+	bool "OSRAM TSL2522 ambient light sensing and light flicker detection sensor"
+	default y
+	depends on DT_HAS_OSRAM_TSL2522_ENABLED
+	select I2C
+	select FPU if CPU_HAS_FPU
+	help
+	  Enable driver for OSRAM TSL2522  ambient light sensing and light flicker detection sensor.

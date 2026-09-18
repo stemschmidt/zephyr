@@ -1,0 +1,9 @@
+# Copyright (c) 2026 Carl Zeiss Meditec AG
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+    OSRAM TSL2522 ambient light sensing and light flicker detection sensor.
+
+compatible: "osram,tsl2522"
+
+include: [sensor-device.yaml, i2c-device.yaml]

@@ -543,6 +543,7 @@ orcl	Oracle Corporation
 orisetech	Orise Technology
 ortustech	Ortus Technology Co., Ltd.
 osddisplays	OSD Displays
+osram	ams OSRAM Group
 ouya	Ouya Inc.
 overkiz	Overkiz SAS
 ovti	OmniVision Technologies Inc.
