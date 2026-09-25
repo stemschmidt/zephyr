@@ -100,11 +100,18 @@ static int internal_sample_fetch(const struct device *dev, enum sensor_channel c
 	int rc = 0;
 	const struct tsl2522_dts_config *cfg = dev->config;
 	struct tsl2522_data *data = dev->data;
+	uint8_t status = 0;
 	uint8_t status2_5[4];
 	uint8_t als_status = 0U;
 	uint8_t als_data[4];
 	bool als_data_valid = false;
 	bool measured_data_valid = false;
+
+	/* Read status in order to clear the modulator saturation bits. */
+	rc = i2c_reg_read_byte_dt(&cfg->i2c, TSL2522_REG_STATUS, &status);
+	if (rc < 0) {
+		return rc;
+	}
 
 	/* Read the status fields 2...5 in one read. */
 	rc = i2c_burst_read_dt(&cfg->i2c, TSL2522_REG_STATUS2, status2_5, sizeof(status2_5));
@@ -170,6 +177,12 @@ static int internal_sample_fetch(const struct device *dev, enum sensor_channel c
 			}
 		}
 		rc = -EINVAL;
+	}
+
+	/* Clear the modulator saturation bits. */
+	rc = i2c_reg_write_byte_dt(&cfg->i2c, TSL2522_REG_STATUS, status);
+	if (rc < 0) {
+		return rc;
 	}
 
 	return rc;

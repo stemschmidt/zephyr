@@ -28,7 +28,7 @@ properties:
 
   modulator-gain:
     type: int
-    default: 7
+    default: 5
     min: 0
     max: 13
     description: |
