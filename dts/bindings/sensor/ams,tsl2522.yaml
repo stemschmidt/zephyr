@@ -2,8 +2,28 @@
 # SPDX-License-Identifier: Apache-2.0
 
 description: |
-    ams OSRAM TSL2522 ambient light sensing and light flicker detection sensor.
+    ams OSRAM TSL2522 ambient light sensing and light flicker detection sensor. See datasheet at
+    https://look.ams-osram.com/m/297a255d37b15c/original/TSL2522-Highly-sensitive-ambient-light-sensor-with-light-flicker-detection.pdf
 
 compatible: "ams,tsl2522"
 
 include: [sensor-device.yaml, i2c-device.yaml]
+
+properties:
+  glass-attenuation:
+    type: int
+    default: 100000
+    description: |
+      Visible light attenuation.
+      Integer value for a representation with 5 decimal points.
+      This default value (1.00000) is chosen for free open space (no glass).
+      Example: 1.2 would be 120000
+
+  glass-ir-attenuation:
+    type: int
+    default: 100000
+    description: |
+      Infa-red light attenuation.
+      Integer value for a representation with 5 decimal points.
+      This default value (1.00000) is chosen for free open space (no glass).
+      Example: 1.2 would be 120000

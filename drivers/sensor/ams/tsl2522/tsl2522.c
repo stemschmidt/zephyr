@@ -38,14 +38,18 @@ static uint32_t get_gain_value(enum sensor_gain_tsl2522 again)
  * CH0: PHOTOPIC
  * CH1: IR
  */
-static uint32_t tsl2522_calc_lux(uint32_t pho, uint32_t ir, uint32_t atime_us,
-				 enum sensor_gain_tsl2522 again)
+static int32_t tsl2522_calc_lux(const struct tsl2522_dts_config *cfg, uint32_t pho_channel,
+				uint32_t ir_channel, uint32_t atime_us,
+				enum sensor_gain_tsl2522 again)
 {
 	int64_t numerator;
 	uint64_t denominator;
 	uint32_t gain = get_gain_value(again);
 
-	if ((uint64_t)ir * 1000ULL < (uint64_t)pho * 1074ULL) {
+	int64_t pho = (int64_t)pho_channel * cfg->glass_attenuation;
+	int64_t ir = (int64_t)ir_channel * cfg->glass_ir_attenuation;
+
+	if (ir * 1000ULL < pho * 1074ULL) {
 		numerator = (int64_t)TSL2522_L_A * pho + (int64_t)TSL2522_L_B * ir;
 	} else {
 		numerator = (int64_t)TSL2522_H_A * pho + (int64_t)TSL2522_H_B * ir;
@@ -57,7 +61,7 @@ static uint32_t tsl2522_calc_lux(uint32_t pho, uint32_t ir, uint32_t atime_us,
 
 	denominator = (uint64_t)TSL2522_SCALE * atime_us / 1000U * gain;
 
-	return (uint32_t)(numerator / denominator);
+	return (int32_t)(numerator / denominator);
 }
 
 static void log_state(uint8_t status2_5[4])
@@ -151,7 +155,7 @@ static int internal_sample_fetch(const struct device *dev, enum sensor_channel c
 			}
 		}
 
-		data->atime_us = data->number_of_samples * data->sample_time_us;
+		data->atime_us = data->number_of_samples * data->time_per_sample_us;
 	} else {
 		if (!als_data_valid) {
 			LOG_ERR("als data invalid!");
@@ -194,19 +198,22 @@ static int tsl2522_channel_get(const struct device *dev, enum sensor_channel cha
 			       struct sensor_value *val)
 {
 	struct tsl2522_data *data = dev->data;
+	const struct tsl2522_dts_config *cfg = dev->config;
 	int rc = 0;
+
+	k_sem_take(&data->sem, K_FOREVER);
 
 	switch (chan) {
 	case SENSOR_CHAN_AMBIENT_LIGHT:
-		val->val1 = tsl2522_calc_lux(data->photopic_channel, data->ir_channel,
+		val->val1 = tsl2522_calc_lux(cfg, data->photopic_channel, data->ir_channel,
 					     data->atime_us, data->gain);
 		break;
 	case SENSOR_CHAN_LIGHT:
-		val->val1 =
-			tsl2522_calc_lux(data->photopic_channel, 0U, data->atime_us, data->gain);
+		val->val1 = tsl2522_calc_lux(cfg, data->photopic_channel, 0U, data->atime_us,
+					     data->gain);
 		break;
 	case SENSOR_CHAN_IR:
-		val->val1 = tsl2522_calc_lux(0U, data->ir_channel, data->atime_us, data->gain);
+		val->val1 = tsl2522_calc_lux(cfg, 0U, data->ir_channel, data->atime_us, data->gain);
 		break;
 	default:
 		val->val1 = 0;
@@ -215,6 +222,8 @@ static int tsl2522_channel_get(const struct device *dev, enum sensor_channel cha
 	}
 
 	val->val2 = 0;
+
+	k_sem_give(&data->sem);
 
 	return rc;
 }
@@ -245,11 +254,11 @@ static int setup_device(const struct device *dev)
 	const struct tsl2522_dts_config *cfg = dev->config;
 	struct tsl2522_data *data = dev->data;
 
-	if (data->sample_time_us >= TLS2522_MIN_SAMPLE_TIME_MS &&
-	    data->sample_time_us <= TLS2522_MAX_SAMPLE_TIME_MS) {
+	if (data->time_per_sample_us >= TLS2522_MIN_SAMPLE_TIME_MS &&
+	    data->time_per_sample_us <= TLS2522_MAX_SAMPLE_TIME_MS) {
 		uint8_t sample_time[2];
 
-		sys_put_le16(convert_us_to_counts(data->sample_time_us), sample_time);
+		sys_put_le16(convert_us_to_counts(data->time_per_sample_us), sample_time);
 		rc = i2c_burst_write_dt(&cfg->i2c, TSL2522_REG_SAMPLE_TIME0, sample_time,
 					sizeof(sample_time));
 		if (rc < 0) {
@@ -343,7 +352,7 @@ static int tsl2522_init(const struct device *dev)
 	uint8_t devid = 0;
 
 	data->als_scale = 4U;
-	data->sample_time_us = 1000U;
+	data->time_per_sample_us = 1000U;
 	data->number_of_samples = 63U;
 	data->gain = TSL2522_GAIN_MOD_16X;
 
@@ -378,6 +387,8 @@ static int tsl2522_init(const struct device *dev)
 #define TSL2522_DEFINE(inst)                                                                       \
 	static const struct tsl2522_dts_config tsl2522_config_##inst = {                           \
 		.i2c = I2C_DT_SPEC_INST_GET(inst),                                                 \
+		.glass_attenuation = DT_INST_PROP(inst, glass_attenuation),                        \
+		.glass_ir_attenuation = DT_INST_PROP(inst, glass_ir_attenuation),                  \
 	};                                                                                         \
                                                                                                    \
 	static struct tsl2522_data tsl2522_data_##inst;                                            \

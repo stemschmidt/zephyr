@@ -14,7 +14,7 @@
 #define TSL2522_MAX_INIT_RETRY 5U
 #define TSL2522_DEVICE_ID      0x5C
 
-#define TSL2522_SCALE              1000LL
+#define TSL2522_SCALE              100000000LL
 #define TLS2522_MIN_SAMPLE_TIME_MS (100U)
 #define TLS2522_MAX_SAMPLE_TIME_MS (1000U * 2048U / 4U)
 #define TLS2522_TICKS_PER_US       (180U * 4U)
@@ -135,6 +135,8 @@ static inline uint16_t convert_us_to_counts(uint16_t us)
 
 struct tsl2522_dts_config {
 	struct i2c_dt_spec i2c;
+	const uint32_t glass_attenuation;
+	const uint32_t glass_ir_attenuation;
 };
 
 struct tsl2522_data {
@@ -142,7 +144,7 @@ struct tsl2522_data {
 	uint32_t atime_us;
 	uint32_t photopic_channel;
 	uint32_t ir_channel;
-	uint16_t sample_time_us;
+	uint16_t time_per_sample_us;
 	uint16_t number_of_samples;
 	enum sensor_gain_tsl2522 gain;
 	uint8_t als_scale;
