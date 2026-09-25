@@ -15,8 +15,8 @@
 #define TSL2522_DEVICE_ID      0x5C
 
 #define TSL2522_SCALE              100000000LL
-#define TLS2522_MIN_SAMPLE_TIME_MS (100U)
-#define TLS2522_MAX_SAMPLE_TIME_MS (1000U * 2048U / 4U)
+#define TLS2522_MIN_SAMPLE_TIME_US (100U)
+#define TLS2522_MAX_SAMPLE_TIME_US (1000U * 2048U / 4U)
 #define TLS2522_TICKS_PER_US       (180U * 4U)
 #define TLS2522_MAX_NR_SAMPLES     2048U
 
@@ -32,6 +32,13 @@
 #define TSL2522_ENABLE_FDEN BIT(6)
 #define TSL2522_ENABLE_AEN  BIT(1)
 #define TSL2522_ENABLE_PON  BIT(0)
+
+#define TSL2522_REG_MEAS_MODE                        0x81
+#define TSL2522_MEAS_MODE_STOP_AFTER_NTH_ITERATION   BIT(7)
+#define TSL2522_MEAS_MODE_EN_AGC_ASAT_DBL_STEP_DOWN  BIT(6)
+#define TSL2522_MEAS_MODE_MEAS_SEQ_SINGLE_SHOT_MODE  BIT(5)
+#define TSL2522_MEAS_MODE_MOD_FIFO_ALS_STAT_WRITE_EN BIT(4)
+#define TSL2522_MEAS_MODE_ALS_SCALE                  GENMASK(3, 0)
 
 #define TSL2522_REG_MEAS_MODE1                        0x82
 #define TSL2522_MEAS_MODE1_MOD_FIFO_FD_END_MARKER_WEN BIT(7)
@@ -130,6 +137,7 @@
 
 static inline uint16_t convert_us_to_counts(uint16_t us)
 {
+	/* Time step is 1.388889μs, so 72 time step (count) per 100 µs. */
 	return (uint16_t)(((uint32_t)us * 72U / 100U) - 1U);
 }
 

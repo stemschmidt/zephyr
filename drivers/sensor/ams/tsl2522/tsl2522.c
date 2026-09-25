@@ -253,9 +253,17 @@ static int setup_device(const struct device *dev)
 	int rc = 0;
 	const struct tsl2522_dts_config *cfg = dev->config;
 	struct tsl2522_data *data = dev->data;
+	uint8_t measure_mode = 0;
 
-	if (data->time_per_sample_us >= TLS2522_MIN_SAMPLE_TIME_MS &&
-	    data->time_per_sample_us <= TLS2522_MAX_SAMPLE_TIME_MS) {
+	rc = i2c_reg_read_byte_dt(&cfg->i2c, TSL2522_REG_MEAS_MODE, &measure_mode);
+	if (rc < 0) {
+		return rc;
+	}
+
+	data->als_scale = FIELD_GET(TSL2522_MEAS_MODE_ALS_SCALE, measure_mode);
+
+	if (data->time_per_sample_us >= TLS2522_MIN_SAMPLE_TIME_US &&
+	    data->time_per_sample_us <= TLS2522_MAX_SAMPLE_TIME_US) {
 		uint8_t sample_time[2];
 
 		sys_put_le16(convert_us_to_counts(data->time_per_sample_us), sample_time);
@@ -351,11 +359,6 @@ static int tsl2522_init(const struct device *dev)
 	int rc = -EAGAIN;
 	uint8_t devid = 0;
 
-	data->als_scale = 4U;
-	data->time_per_sample_us = 1000U;
-	data->number_of_samples = 63U;
-	data->gain = TSL2522_GAIN_MOD_16X;
-
 	k_sem_init(&data->sem, 1, K_SEM_MAX_LIMIT);
 
 	/* Try to access device. */
@@ -391,7 +394,11 @@ static int tsl2522_init(const struct device *dev)
 		.glass_ir_attenuation = DT_INST_PROP(inst, glass_ir_attenuation),                  \
 	};                                                                                         \
                                                                                                    \
-	static struct tsl2522_data tsl2522_data_##inst;                                            \
+	static struct tsl2522_data tsl2522_data_##inst = {                                         \
+		.time_per_sample_us = (uint16_t)DT_INST_PROP(inst, time_per_sample_us),            \
+		.number_of_samples = (uint16_t)DT_INST_PROP(inst, number_of_samples),              \
+		.gain = (enum sensor_gain_tsl2522)DT_INST_PROP(inst, modulator_gain),              \
+	};                                                                                         \
                                                                                                    \
 	SENSOR_DEVICE_DT_INST_DEFINE(inst, tsl2522_init, NULL, &tsl2522_data_##inst,               \
 				     &tsl2522_config_##inst, POST_KERNEL,                          \

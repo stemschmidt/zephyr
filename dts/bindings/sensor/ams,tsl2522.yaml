@@ -10,6 +10,30 @@ compatible: "ams,tsl2522"
 include: [sensor-device.yaml, i2c-device.yaml]
 
 properties:
+  time-per-sample-us:
+    type: int
+    default: 1000
+    min: 100
+    max: 1000
+    description: |
+      Time for each sample
+
+  number-of-samples:
+    type: int
+    default: 64
+    min: 1
+    max: 128
+    description: |
+      Number of samples taken in one conversion
+
+  modulator-gain:
+    type: int
+    default: 7
+    min: 0
+    max: 13
+    description: |
+      Gain used in both modulators
+
   glass-attenuation:
     type: int
     default: 100000
