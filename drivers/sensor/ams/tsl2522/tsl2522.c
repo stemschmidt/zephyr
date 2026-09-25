@@ -35,7 +35,7 @@ static uint32_t get_gain_value(uint8_t again)
  * CH0: PHOTOPIC
  * CH1: IR
  */
-static uint32_t tsl2522_calc_lux(uint32_t pho, uint32_t ir, uint32_t atime_ms, uint32_t again)
+static uint32_t tsl2522_calc_lux(uint32_t pho, uint32_t ir, uint32_t atime_us, uint32_t again)
 {
 	int64_t numerator;
 	uint64_t denominator;
@@ -50,7 +50,7 @@ static uint32_t tsl2522_calc_lux(uint32_t pho, uint32_t ir, uint32_t atime_ms, u
 		return 0;
 	}
 
-	denominator = (uint64_t)TSL2522_SCALE * atime_ms * again;
+	denominator = (uint64_t)TSL2522_SCALE * atime_us / 1000U * again;
 
 	return (uint32_t)(numerator / denominator);
 }
@@ -86,38 +86,16 @@ static void log_state(uint8_t status2_5[4])
 #endif
 }
 
-static int tsl2522_sample_fetch(const struct device *dev, enum sensor_channel chan)
+static int internal_sample_fetch(const struct device *dev, enum sensor_channel chan)
 {
 	int rc = 0;
 	const struct tsl2522_dts_config *cfg = dev->config;
 	struct tsl2522_data *data = dev->data;
-	uint8_t status = 0U;
 	uint8_t status2_5[4];
 	uint8_t als_status = 0U;
 	uint8_t als_data[4];
 	bool als_data_valid = false;
 	bool measured_data_valid = false;
-
-	if (chan != SENSOR_CHAN_ALL && chan != SENSOR_CHAN_AMBIENT_LIGHT &&
-	    chan != SENSOR_CHAN_LIGHT && chan != SENSOR_CHAN_IR) {
-		return -ENOTSUP;
-	}
-
-	rc = i2c_reg_read_byte_dt(&cfg->i2c, TSL2522_REG_STATUS, &status);
-	if (rc < 0) {
-		return rc;
-	}
-	LOG_INF("status (0x%02x): modulator int %d, ALS int %d, FIFO int %d, SYSTEM int %d", status,
-		(bool)FIELD_GET(TSL2522_STATUS_MINT, status),
-		(bool)FIELD_GET(TSL2522_STATUS_AINT, status),
-		(bool)FIELD_GET(TSL2522_STATUS_FINT, status),
-		(bool)FIELD_GET(TSL2522_STATUS_SINT, status));
-
-	/* Clear status bits. */
-	rc = i2c_reg_write_byte_dt(&cfg->i2c, TSL2522_REG_STATUS, status);
-	if (rc < 0) {
-		return rc;
-	}
 
 	/* Read the status fields 2...5 in one read. */
 	rc = i2c_burst_read_dt(&cfg->i2c, TSL2522_REG_STATUS2, status2_5, sizeof(status2_5));
@@ -152,29 +130,23 @@ static int tsl2522_sample_fetch(const struct device *dev, enum sensor_channel ch
 			return rc;
 		}
 
-		data->photopic_channel = (uint32_t)sys_get_le16(&als_data[0]);
-		if (!FIELD_GET(TSL2522_ALS_STATUS_DATA0_SCALED, als_status)) {
-			data->photopic_channel = data->photopic_channel << data->als_scale;
-		}
-		data->ir_channel = (uint32_t)sys_get_le16(&als_data[2]);
-		if (!FIELD_GET(TSL2522_ALS_STATUS_DATA1_SCALED, als_status)) {
-			data->ir_channel = data->ir_channel << data->als_scale;
-		}
-
-		uint8_t als_status2;
-
-		rc = i2c_reg_read_byte_dt(&cfg->i2c, TSL2522_REG_ALS_STATUS2, &als_status2);
-		if (rc < 0) {
-			return rc;
+		if (chan == SENSOR_CHAN_ALL || chan == SENSOR_CHAN_AMBIENT_LIGHT ||
+		    chan == SENSOR_CHAN_LIGHT) {
+			data->photopic_channel = (uint32_t)sys_get_le16(&als_data[0]);
+			if (!FIELD_GET(TSL2522_ALS_STATUS_DATA0_SCALED, als_status)) {
+				data->photopic_channel = data->photopic_channel << data->als_scale;
+			}
 		}
 
-		data->again_pho = FIELD_GET(TSL2522_ALS_STATUS2_DATA0_GAIN, als_status2);
-		data->again_ir = FIELD_GET(TSL2522_ALS_STATUS2_DATA1_GAIN, als_status2);
+		if (chan == SENSOR_CHAN_ALL || chan == SENSOR_CHAN_AMBIENT_LIGHT ||
+		    chan == SENSOR_CHAN_IR) {
+			data->ir_channel = (uint32_t)sys_get_le16(&als_data[2]);
+			if (!FIELD_GET(TSL2522_ALS_STATUS_DATA1_SCALED, als_status)) {
+				data->ir_channel = data->ir_channel << data->als_scale;
+			}
+		}
 
-		LOG_INF("again_pho: %u, again_ir %u", get_gain_value(data->again_pho),
-			get_gain_value(data->again_ir));
-		/* Do the calculation here with the read-back information from the sequence step. */
-		data->atime_ms = data->nr_samples * data->sample_time_ms;
+		data->atime_us = data->number_of_samples * data->sample_time_us;
 	} else {
 		if (!als_data_valid) {
 			LOG_ERR("als data invalid!");
@@ -190,6 +162,26 @@ static int tsl2522_sample_fetch(const struct device *dev, enum sensor_channel ch
 		}
 		rc = -EINVAL;
 	}
+
+	return rc;
+}
+
+static int tsl2522_sample_fetch(const struct device *dev, enum sensor_channel chan)
+{
+	int rc = 0;
+	struct tsl2522_data *data = dev->data;
+
+	if (chan != SENSOR_CHAN_ALL && chan != SENSOR_CHAN_AMBIENT_LIGHT &&
+	    chan != SENSOR_CHAN_LIGHT && chan != SENSOR_CHAN_IR) {
+		return -ENOTSUP;
+	}
+
+	k_sem_take(&data->sem, K_FOREVER);
+
+	rc = internal_sample_fetch(dev, chan);
+
+	k_sem_give(&data->sem);
+
 	return rc;
 }
 
@@ -202,15 +194,15 @@ static int tsl2522_channel_get(const struct device *dev, enum sensor_channel cha
 	switch (chan) {
 	case SENSOR_CHAN_AMBIENT_LIGHT:
 		val->val1 = tsl2522_calc_lux(data->photopic_channel, data->ir_channel,
-					     data->atime_ms, get_gain_value(data->again_pho));
+					     data->atime_us, get_gain_value(data->gain));
 		break;
 	case SENSOR_CHAN_LIGHT:
-		val->val1 = tsl2522_calc_lux(data->photopic_channel, 0U, data->atime_ms,
-					     get_gain_value(data->again_pho));
+		val->val1 = tsl2522_calc_lux(data->photopic_channel, 0U, data->atime_us,
+					     get_gain_value(data->gain));
 		break;
 	case SENSOR_CHAN_IR:
-		val->val1 = tsl2522_calc_lux(0U, data->ir_channel, data->atime_ms,
-					     get_gain_value(data->again_ir));
+		val->val1 = tsl2522_calc_lux(0U, data->ir_channel, data->atime_us,
+					     get_gain_value(data->gain));
 		break;
 	default:
 		val->val1 = 0;
@@ -249,14 +241,17 @@ static int setup_device(const struct device *dev)
 	const struct tsl2522_dts_config *cfg = dev->config;
 	struct tsl2522_data *data = dev->data;
 
+#if 0
 	rc = i2c_reg_write_byte_dt(&cfg->i2c, TSL2522_REG_WTIME, TSL2522_WTIME_DEFAULT);
 	if (rc < 0) {
 		return rc;
 	}
-
-	if (data->sample_time_ms > 0 && data->sample_time_ms <= TLS2522_MAX_SAMPLE_TIME_MS) {
+#endif
+	if (data->sample_time_us >= TLS2522_MIN_SAMPLE_TIME_MS &&
+	    data->sample_time_us <= TLS2522_MAX_SAMPLE_TIME_MS) {
 		uint8_t sample_time[2];
-		sys_put_le16((data->sample_time_ms * TLS2522_TICKS_PER_MS) - 1U, sample_time);
+
+		sys_put_le16(convert_us_to_counts(data->sample_time_us), sample_time);
 		rc = i2c_burst_write_dt(&cfg->i2c, TSL2522_REG_SAMPLE_TIME0, sample_time,
 					sizeof(sample_time));
 		if (rc < 0) {
@@ -266,9 +261,9 @@ static int setup_device(const struct device *dev)
 		return -EINVAL;
 	}
 
-	if (data->nr_samples > 0 && data->nr_samples <= TLS2522_MAX_NR_SAMPLES) {
+	if (data->number_of_samples > 0 && data->number_of_samples <= TLS2522_MAX_NR_SAMPLES) {
 		uint8_t nr_samples[2];
-		sys_put_le16(data->nr_samples - 1U, nr_samples);
+		sys_put_le16(data->number_of_samples - 1U, nr_samples);
 		rc = i2c_burst_write_dt(&cfg->i2c, TSL2522_REG_ALS_NR_SAMPLES0, nr_samples,
 					sizeof(nr_samples));
 		if (rc < 0) {
@@ -283,13 +278,7 @@ static int setup_device(const struct device *dev)
 	if (rc < 0) {
 		return rc;
 	}
-#if 0
-	rc = i2c_reg_write_byte_dt(&cfg->i2c, TSL2522_REG_MEAS_MODE1,
-				   TSL2522_MEAS_MODE1_ALS_MSB_POSITION_DEFAULT);
-	if (rc < 0) {
-		return rc;
-	}
-#endif
+
 	rc = i2c_reg_write_byte_dt(
 		&cfg->i2c, TSL2522_REG_MEAS_SEQR_STEP0_MOD_GAINX_L,
 		FIELD_PREP(TSL2522_MEAS_SEQR_STEP0_MOD_GAIN1, TSL2522_GAIN_MOD_16X) |
@@ -354,8 +343,11 @@ static int tsl2522_init(const struct device *dev)
 	uint8_t devid = 0;
 
 	data->als_scale = 4U;
-	data->sample_time_ms = 1U;
-	data->nr_samples = 63U;
+	data->sample_time_us = 1000U;
+	data->number_of_samples = 63U;
+	data->gain = TSL2522_GAIN_MOD_16X;
+
+	k_sem_init(&data->sem, 1, K_SEM_MAX_LIMIT);
 
 	/* Try to access device. */
 	for (int i = 0; i < TSL2522_MAX_INIT_RETRY && rc != 0; i++) {

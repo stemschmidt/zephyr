@@ -14,8 +14,9 @@
 #define TSL2522_DEVICE_ID      0x5C
 
 #define TSL2522_SCALE              1000000LL
-#define TLS2522_MAX_SAMPLE_TIME_MS (2048U / 4U)
-#define TLS2522_TICKS_PER_MS       (180U * 4U)
+#define TLS2522_MIN_SAMPLE_TIME_MS (100U)
+#define TLS2522_MAX_SAMPLE_TIME_MS (1000U * 2048U / 4U)
+#define TLS2522_TICKS_PER_US       (180U * 4U)
 #define TLS2522_MAX_NR_SAMPLES     2048U
 
 /* Low segment */
@@ -141,6 +142,11 @@
 #define TSL2522_MOD_SEL_MOD_0   1U
 #define TSL2522_MOD_SEL_MOD_1   2U
 
+static inline uint16_t convert_us_to_counts(uint16_t us)
+{
+	return (uint16_t)(((uint32_t)us * 72U / 100U) - 1U);
+}
+
 struct tsl2522_dts_config {
 	struct i2c_dt_spec i2c;
 };
@@ -148,11 +154,10 @@ struct tsl2522_dts_config {
 struct tsl2522_data {
 	struct k_sem sem;
 	uint8_t als_scale;
-	uint8_t again_pho;
-	uint8_t again_ir;
-	uint32_t atime_ms;
-	uint16_t sample_time_ms;
-	uint16_t nr_samples;
+	uint8_t gain;
+	uint32_t atime_us;
+	uint16_t sample_time_us;
+	uint16_t number_of_samples;
 	uint32_t photopic_channel;
 	uint32_t ir_channel;
 };
