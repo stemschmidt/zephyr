@@ -15,10 +15,13 @@
 
 LOG_MODULE_REGISTER(tsl2522, CONFIG_SENSOR_LOG_LEVEL);
 
-static uint32_t get_gain_value(uint8_t again)
+/* gain TSL2522_GAIN_MOD_HALF returns 500, TSL2522_GAIN_MOD_1X returns 1000, ... */
+static uint32_t get_gain_value(enum sensor_gain_tsl2522 again)
 {
 	if (again >= TSL2522_GAIN_MOD_1X && again <= TSL2522_GAIN_MOD_4096X) {
-		return 1U << (again - 1);
+		return 1000U * (1U << (again - 1));
+	} else if (again == TSL2522_GAIN_MOD_HALF) {
+		return 500U;
 	}
 	return 0;
 }
@@ -35,10 +38,12 @@ static uint32_t get_gain_value(uint8_t again)
  * CH0: PHOTOPIC
  * CH1: IR
  */
-static uint32_t tsl2522_calc_lux(uint32_t pho, uint32_t ir, uint32_t atime_us, uint32_t again)
+static uint32_t tsl2522_calc_lux(uint32_t pho, uint32_t ir, uint32_t atime_us,
+				 enum sensor_gain_tsl2522 again)
 {
 	int64_t numerator;
 	uint64_t denominator;
+	uint32_t gain = get_gain_value(again);
 
 	if ((uint64_t)ir * 1000ULL < (uint64_t)pho * 1074ULL) {
 		numerator = (int64_t)TSL2522_L_A * pho + (int64_t)TSL2522_L_B * ir;
@@ -50,7 +55,7 @@ static uint32_t tsl2522_calc_lux(uint32_t pho, uint32_t ir, uint32_t atime_us, u
 		return 0;
 	}
 
-	denominator = (uint64_t)TSL2522_SCALE * atime_us / 1000U * again;
+	denominator = (uint64_t)TSL2522_SCALE * atime_us / 1000U * gain;
 
 	return (uint32_t)(numerator / denominator);
 }
@@ -194,15 +199,14 @@ static int tsl2522_channel_get(const struct device *dev, enum sensor_channel cha
 	switch (chan) {
 	case SENSOR_CHAN_AMBIENT_LIGHT:
 		val->val1 = tsl2522_calc_lux(data->photopic_channel, data->ir_channel,
-					     data->atime_us, get_gain_value(data->gain));
+					     data->atime_us, data->gain);
 		break;
 	case SENSOR_CHAN_LIGHT:
-		val->val1 = tsl2522_calc_lux(data->photopic_channel, 0U, data->atime_us,
-					     get_gain_value(data->gain));
+		val->val1 =
+			tsl2522_calc_lux(data->photopic_channel, 0U, data->atime_us, data->gain);
 		break;
 	case SENSOR_CHAN_IR:
-		val->val1 = tsl2522_calc_lux(0U, data->ir_channel, data->atime_us,
-					     get_gain_value(data->gain));
+		val->val1 = tsl2522_calc_lux(0U, data->ir_channel, data->atime_us, data->gain);
 		break;
 	default:
 		val->val1 = 0;
@@ -241,12 +245,6 @@ static int setup_device(const struct device *dev)
 	const struct tsl2522_dts_config *cfg = dev->config;
 	struct tsl2522_data *data = dev->data;
 
-#if 0
-	rc = i2c_reg_write_byte_dt(&cfg->i2c, TSL2522_REG_WTIME, TSL2522_WTIME_DEFAULT);
-	if (rc < 0) {
-		return rc;
-	}
-#endif
 	if (data->sample_time_us >= TLS2522_MIN_SAMPLE_TIME_MS &&
 	    data->sample_time_us <= TLS2522_MAX_SAMPLE_TIME_MS) {
 		uint8_t sample_time[2];
@@ -281,12 +279,13 @@ static int setup_device(const struct device *dev)
 
 	rc = i2c_reg_write_byte_dt(
 		&cfg->i2c, TSL2522_REG_MEAS_SEQR_STEP0_MOD_GAINX_L,
-		FIELD_PREP(TSL2522_MEAS_SEQR_STEP0_MOD_GAIN1, TSL2522_GAIN_MOD_16X) |
-			FIELD_PREP(TSL2522_MEAS_SEQR_STEP0_MOD_GAIN0, TSL2522_GAIN_MOD_16X));
+		FIELD_PREP(TSL2522_MEAS_SEQR_STEP0_MOD_GAIN1, data->gain) |
+			FIELD_PREP(TSL2522_MEAS_SEQR_STEP0_MOD_GAIN0, data->gain));
 	if (rc < 0) {
 		return rc;
 	}
 
+	/* Assign photopic diodes to modulator 0 and the IR diodes to modulator 1. */
 	rc = i2c_reg_write_byte_dt(
 		&cfg->i2c, TSL2522_REG_MEAS_SEQR_STEP0_MOD_PHDX_SMUX_L,
 		FIELD_PREP(TSL2522_MEAS_SEQR_STEP0_MOD_PHD3, TSL2522_MOD_SEL_MOD_0) |
@@ -305,6 +304,7 @@ static int setup_device(const struct device *dev)
 		return rc;
 	}
 
+	/* Enable ALS and device. */
 	rc = i2c_reg_write_byte_dt(&cfg->i2c, TSL2522_REG_ENABLE,
 				   TSL2522_ENABLE_PON | TSL2522_ENABLE_AEN);
 	if (rc < 0) {

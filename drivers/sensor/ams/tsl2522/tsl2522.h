@@ -6,14 +6,15 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util_macro.h>
+#include <zephyr/drivers/sensor/tsl2522.h>
 
-#ifndef ZEPHYR_DRIVERS_SENSOR_TSL2522_H_
-#define ZEPHYR_DRIVERS_SENSOR_TSL2522_H_
+#ifndef ZEPHYR_DRIVERS_SENSOR_TSL2522_TSL2522_H_
+#define ZEPHYR_DRIVERS_SENSOR_TSL2522_TSL2522_H_
 
 #define TSL2522_MAX_INIT_RETRY 5U
 #define TSL2522_DEVICE_ID      0x5C
 
-#define TSL2522_SCALE              1000000LL
+#define TSL2522_SCALE              1000LL
 #define TLS2522_MIN_SAMPLE_TIME_MS (100U)
 #define TLS2522_MAX_SAMPLE_TIME_MS (1000U * 2048U / 4U)
 #define TLS2522_TICKS_PER_US       (180U * 4U)
@@ -113,21 +114,6 @@
 #define TSL2522_MEAS_SEQR_STEP0_MOD_GAIN1       GENMASK(7, 4)
 #define TSL2522_MEAS_SEQR_STEP0_MOD_GAIN0       GENMASK(3, 0)
 
-#define TSL2522_GAIN_MOD_HALF  0x00
-#define TSL2522_GAIN_MOD_1X    0x01
-#define TSL2522_GAIN_MOD_2X    0x02
-#define TSL2522_GAIN_MOD_4X    0x03
-#define TSL2522_GAIN_MOD_8X    0x04
-#define TSL2522_GAIN_MOD_16X   0x05
-#define TSL2522_GAIN_MOD_32X   0x06
-#define TSL2522_GAIN_MOD_64X   0x07
-#define TSL2522_GAIN_MOD_128X  0x08
-#define TSL2522_GAIN_MOD_256X  0x09
-#define TSL2522_GAIN_MOD_512X  0x0A
-#define TSL2522_GAIN_MOD_1024X 0x0B
-#define TSL2522_GAIN_MOD_2048X 0x0C
-#define TSL2522_GAIN_MOD_4096X 0x0D
-
 #define TSL2522_REG_MEAS_SEQR_STEP0_MOD_PHDX_SMUX_L 0xDC
 #define TSL2522_MEAS_SEQR_STEP0_MOD_PHD3            GENMASK(7, 6)
 #define TSL2522_MEAS_SEQR_STEP0_MOD_PHD2            GENMASK(5, 4)
@@ -153,13 +139,13 @@ struct tsl2522_dts_config {
 
 struct tsl2522_data {
 	struct k_sem sem;
-	uint8_t als_scale;
-	uint8_t gain;
 	uint32_t atime_us;
-	uint16_t sample_time_us;
-	uint16_t number_of_samples;
 	uint32_t photopic_channel;
 	uint32_t ir_channel;
+	uint16_t sample_time_us;
+	uint16_t number_of_samples;
+	enum sensor_gain_tsl2522 gain;
+	uint8_t als_scale;
 };
 
-#endif /* ZEPHYR_DRIVERS_SENSOR_TSL2522_H_ */
+#endif /* ZEPHYR_DRIVERS_SENSOR_TSL2522_TSL2522_H_ */
