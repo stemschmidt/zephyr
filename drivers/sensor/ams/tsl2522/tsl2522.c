@@ -15,21 +15,6 @@
 
 LOG_MODULE_REGISTER(tsl2522, CONFIG_SENSOR_LOG_LEVEL);
 
-struct tsl2522_dts_config {
-	struct i2c_dt_spec i2c;
-};
-
-struct tsl2522_data {
-	uint8_t als_scale;
-	uint8_t again_pho;
-	uint8_t again_ir;
-	uint32_t atime_ms;
-	uint16_t sample_time_ms;
-	uint16_t nr_samples;
-	uint32_t photopic_channel;
-	uint32_t ir_channel;
-};
-
 static uint32_t get_gain_value(uint8_t again)
 {
 	if (again >= TSL2522_GAIN_MOD_1X && again <= TSL2522_GAIN_MOD_4096X) {

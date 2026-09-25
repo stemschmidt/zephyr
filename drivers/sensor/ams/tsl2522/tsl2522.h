@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/kernel.h>
 #include <zephyr/sys/util_macro.h>
 
 #ifndef ZEPHYR_DRIVERS_SENSOR_TSL2522_H_
@@ -138,5 +140,21 @@
 #define TSL2522_MOD_SEL_NO_CONN 0U
 #define TSL2522_MOD_SEL_MOD_0   1U
 #define TSL2522_MOD_SEL_MOD_1   2U
+
+struct tsl2522_dts_config {
+	struct i2c_dt_spec i2c;
+};
+
+struct tsl2522_data {
+	struct k_sem sem;
+	uint8_t als_scale;
+	uint8_t again_pho;
+	uint8_t again_ir;
+	uint32_t atime_ms;
+	uint16_t sample_time_ms;
+	uint16_t nr_samples;
+	uint32_t photopic_channel;
+	uint32_t ir_channel;
+};
 
 #endif /* ZEPHYR_DRIVERS_SENSOR_TSL2522_H_ */
