@@ -7,5 +7,5 @@ config TSL2522
 	depends on DT_HAS_AMS_TSL2522_ENABLED
 	select I2C
 	help
-	  Enable driver for ams OSRAM TSL2522 ambient light sensing and light flicker detection sensor.
-
+	  Enable driver for ams OSRAM TSL2522 ambient light sensing and light flicker
+	  detection sensor.

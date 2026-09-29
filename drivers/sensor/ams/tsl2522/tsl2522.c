@@ -28,34 +28,35 @@ LOG_MODULE_REGISTER(tsl2522, CONFIG_SENSOR_LOG_LEVEL);
  * CH0: PHOTOPIC
  * CH1: IR
  */
-static int32_t tsl2522_calc_lux(const struct tsl2522_dts_config *cfg,
-				struct tsl2522_measurement *measurement)
+static int tsl2522_calc_lux(const struct tsl2522_dts_config *cfg,
+			    const struct tsl2522_measurement *m, struct sensor_value *val)
 {
-	int64_t numerator;
-	uint64_t denominator;
+	int64_t pho = (int64_t)m->photopic_channel * cfg->glass_attenuation;
+	int64_t ir = (int64_t)m->ir_channel * cfg->glass_ir_attenuation;
+	uint64_t den = (uint64_t)(TSL2522_SCALE / TSL2522_US_IN_MS) * m->atime_us * m->gain;
+	int64_t num;
 
-	int64_t pho = (int64_t)measurement->photopic_channel * cfg->glass_attenuation;
-	int64_t ir = (int64_t)measurement->ir_channel * cfg->glass_ir_attenuation;
+	if (den == 0U) {
+		return -ENODATA;
+	}
 
-	if (ir * 1000ULL < pho * 1074ULL) {
-		numerator = (int64_t)TSL2522_L_A * pho + (int64_t)TSL2522_L_B * ir;
+	if (ir * 1000LL < pho * 1074LL) {
+		num = TSL2522_L_A * pho + TSL2522_L_B * ir;
 	} else {
-		numerator = (int64_t)TSL2522_H_A * pho + (int64_t)TSL2522_H_B * ir;
+		num = TSL2522_H_A * pho + TSL2522_H_B * ir;
 	}
 
-	if (numerator <= 0) {
-		if (measurement->photopic_channel == 0) {
-			/* Get IR channel only. */
-			numerator = -numerator;
-		} else {
-			return 0;
-		}
+	if (num <= 0) {
+		val->val1 = 0;
+		val->val2 = 0;
+		return 0;
 	}
 
-	denominator =
-		(uint64_t)(TSL2522_SCALE / US_IN_MS) * measurement->atime_us * measurement->gain;
+	val->val1 = (int32_t)((uint64_t)num / den);
+	/* den >= 5e9, so den / 1e6 >= 5000; a direct rem * 1e6 would overflow uint64_t. */
+	val->val2 = (int32_t)MIN(((uint64_t)num % den) / (den / 1000000U), 999999U);
 
-	return (int32_t)(numerator / denominator);
+	return 0;
 }
 
 static void log_state(const uint8_t *status2_5)
@@ -94,8 +95,6 @@ static int internal_sample_fetch(const struct device *dev)
 	struct tsl2522_data *data = dev->data;
 	uint8_t status = 0;
 	uint8_t status2_5[4];
-	uint8_t als_status = 0U;
-	uint8_t als_data[4];
 	bool als_data_valid = false;
 	bool measured_data_valid = false;
 
@@ -118,11 +117,21 @@ static int internal_sample_fetch(const struct device *dev)
 	log_state(status2_5);
 
 	if (als_data_valid && measured_data_valid) {
+		uint8_t als_status = 0U;
+		uint8_t als_status2 = 0U;
+		uint8_t als_data[4];
+
 		/* Fetch actual data. */
 		rc = i2c_reg_read_byte_dt(&cfg->i2c, TSL2522_REG_ALS_STATUS, &als_status);
 		if (rc < 0) {
 			goto exit;
 		}
+
+		rc = i2c_reg_read_byte_dt(&cfg->i2c, TSL2522_REG_ALS_STATUS2, &als_status2);
+		if (rc < 0) {
+			goto exit;
+		}
+
 		LOG_DBG("als_status (0x%02x): seq step %lu, ana_sat_dat0 %d, ana_sat_dat1 %d, "
 			"dat0_scaled %d, dat1_scaled %d",
 			als_status, FIELD_GET(TSL2522_ALS_STATUS_MEAS_SEQR_STEP, als_status),
@@ -134,8 +143,9 @@ static int internal_sample_fetch(const struct device *dev)
 		data->measurement.saturation =
 			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA0_ANA_SAT, als_status) ||
 			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA1_ANA_SAT, als_status) ||
-			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA0_SCALED, als_status) ||
-			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA1_SCALED, als_status);
+			(bool)FIELD_GET(TSL2522_STATUS2_ALS_DIG_SAT, status2_5[0]) ||
+			(bool)FIELD_GET(TSL2522_STATUS2_MOD_ANA_SAT1, status2_5[0]) ||
+			(bool)FIELD_GET(TSL2522_STATUS2_MOD_ANA_SAT0, status2_5[0]);
 
 		rc = i2c_burst_read_dt(&cfg->i2c, TSL2522_REG_ALS_DATA, als_data, sizeof(als_data));
 		if (rc < 0) {
@@ -154,7 +164,9 @@ static int internal_sample_fetch(const struct device *dev)
 		}
 
 		data->measurement.atime_us = data->number_of_samples * data->time_per_sample_us;
-		data->measurement.gain = data->gain;
+		/* Take the gain for the converted data from the device. */
+		data->measurement.gain = tsl2522_convert_gain_enum_to_value(
+			FIELD_GET(TSL2522_ALS_STATUS2_DATA0_GAIN, als_status2));
 	} else {
 		if (!als_data_valid) {
 			LOG_DBG("als data not yet available!");
@@ -193,36 +205,58 @@ static int tsl2522_sample_fetch(const struct device *dev, enum sensor_channel ch
 	return rc;
 }
 
+/*
+ * IR channel: normalized count rate in counts / (ms * gain), corrected by the glass
+ * attenuation. Not a photometric unit, the value is only proportional to the IR irradiance.
+ *
+ * Overflow check (raw <= 65535 << 4, att <= 5e6, atime_us * gain <= 5.24e11):
+ *   num          <= 1.05e6 * 5e6 * 10 = 5.2e13         (uint64_t: ok)
+ *   rem * 1e6    <  5.24e11 * 1e6     = 5.2e17         (uint64_t: ok)
+ *   quotient     <= 5.2e13 / 5e4      = 1e9            (int32_t:  ok)
+ */
+static int tsl2522_calc_ir(const struct tsl2522_dts_config *cfg,
+			   const struct tsl2522_measurement *m, struct sensor_value *val)
+{
+	uint64_t den = (uint64_t)m->atime_us * m->gain;
+	uint64_t num;
+
+	if (den == 0U) {
+		return -ENODATA;
+	}
+
+	num = (uint64_t)m->ir_channel * cfg->glass_ir_attenuation * 10U;
+
+	val->val1 = (int32_t)(num / den);
+	val->val2 = (int32_t)(((num % den) * 1000000ULL) / den);
+
+	return 0;
+}
+
 static int tsl2522_channel_get(const struct device *dev, enum sensor_channel chan,
 			       struct sensor_value *val)
 {
 	struct tsl2522_data *data = dev->data;
 	const struct tsl2522_dts_config *cfg = dev->config;
-	int rc = 0;
+	int rc;
 
 	k_mutex_lock(&data->mutex, K_FOREVER);
 
 	switch (chan) {
 	case SENSOR_CHAN_AMBIENT_LIGHT:
-		val->val1 = tsl2522_calc_lux(cfg, &data->measurement);
-		break;
 	case SENSOR_CHAN_LIGHT:
-		val->val1 = tsl2522_calc_lux(cfg, &data->measurement);
+		rc = tsl2522_calc_lux(cfg, &data->measurement, val);
 		break;
 	case SENSOR_CHAN_IR:
-		val->val1 = tsl2522_calc_lux(cfg, &data->measurement);
+		rc = tsl2522_calc_ir(cfg, &data->measurement, val);
 		break;
 	default:
-		val->val1 = 0;
 		rc = -ENOTSUP;
 		break;
 	}
 
-	if (data->measurement.saturation) {
+	if (rc == 0 && data->measurement.saturation) {
 		rc = -EOVERFLOW;
 	}
-
-	val->val2 = 0;
 
 	k_mutex_unlock(&data->mutex);
 
@@ -289,7 +323,7 @@ static int tsl2522_attribute_get(const struct device *dev, enum sensor_channel c
 
 	k_mutex_lock(&data->mutex, K_FOREVER);
 	if (attr == SENSOR_ATTR_GAIN) {
-		val->val1 = convert_gain_value_to_enum(data->gain);
+		val->val1 = data->gain;
 		val->val2 = 0;
 	} else {
 		switch ((enum sensor_attribute_tsl2522)attr) {
@@ -327,10 +361,8 @@ static int tsl2522_attribute_set(const struct device *dev, enum sensor_channel c
 	k_mutex_lock(&data->mutex, K_FOREVER);
 
 	if (attr == SENSOR_ATTR_GAIN) {
-		enum sensor_gain_tsl2522 gain_enum = (enum sensor_gain_tsl2522)val->val1;
-
-		if (IN_RANGE(gain_enum, TSL2522_GAIN_MOD_HALF, TSL2522_GAIN_MOD_4096X)) {
-			uint32_t gain = tsl2522_convert_gain_enum_to_value(gain_enum);
+		if (IN_RANGE(val->val1, TSL2522_GAIN_MOD_HALF, TSL2522_GAIN_MOD_4096X)) {
+			enum sensor_gain_tsl2522 gain = (enum sensor_gain_tsl2522)val->val1;
 
 			if (gain != data->gain) {
 				rc = disable_ambient_light_sensing(dev);
@@ -339,7 +371,7 @@ static int tsl2522_attribute_set(const struct device *dev, enum sensor_channel c
 					return rc;
 				}
 				enable_sensing = true;
-				rc = set_modulator_gain(dev, gain_enum);
+				rc = set_modulator_gain(dev, gain);
 				if (rc == 0) {
 					data->gain = gain;
 				}
@@ -377,7 +409,8 @@ static int tsl2522_attribute_set(const struct device *dev, enum sensor_channel c
 			}
 			break;
 		case SENSOR_ATTR_NUMBER_OF_SAMPLES:
-			if (IN_RANGE(val->val1, NUMBER_OF_SAMPLES_MIN, NUMBER_OF_SAMPLES_MAX)) {
+			if (IN_RANGE(val->val1, TSL2522_NUMBER_OF_SAMPLES_MIN,
+				     TSL2522_NUMBER_OF_SAMPLES_MAX)) {
 				uint16_t number_of_samples = (uint16_t)val->val1;
 
 				if (number_of_samples != data->number_of_samples) {
@@ -403,7 +436,10 @@ static int tsl2522_attribute_set(const struct device *dev, enum sensor_channel c
 	}
 
 	if (enable_sensing) {
-		enable_ambient_light_sensing(dev);
+		int rc2 = enable_ambient_light_sensing(dev);
+		if (rc == 0) {
+			rc = rc2;
+		}
 	}
 
 	k_mutex_unlock(&data->mutex);
@@ -449,7 +485,6 @@ static int setup_device(const struct device *dev)
 	}
 
 	data->als_scale = FIELD_GET(TSL2522_MEAS_MODE_ALS_SCALE, measure_mode);
-	data->measurement.atime_us = data->number_of_samples * data->time_per_sample_us;
 
 	rc = set_time_per_sample_us(dev, data->time_per_sample_us);
 	if (rc < 0) {
@@ -471,7 +506,7 @@ static int setup_device(const struct device *dev)
 	if (rc < 0) {
 		return rc;
 	}
-	data->gain = tsl2522_convert_gain_enum_to_value(cfg->gain_enum);
+	data->gain = cfg->gain_enum;
 
 	/* Assign photopic diodes to modulator 0 and the IR diodes to modulator 1. */
 	rc = i2c_reg_write_byte_dt(
@@ -536,7 +571,7 @@ static int tsl2522_init(const struct device *dev)
 	}
 
 	if (devid != TSL2522_DEVICE_ID) {
-		LOG_ERR("Invalid chip ID (was 0x%2x, expected 0x%2x)", devid, TSL2522_DEVICE_ID);
+		LOG_ERR("Invalid chip ID (was 0x%02x, expected 0x%02x)", devid, TSL2522_DEVICE_ID);
 		return -EIO;
 	}
 
@@ -558,8 +593,8 @@ static int tsl2522_init(const struct device *dev)
 	};                                                                                         \
                                                                                                    \
 	static struct tsl2522_data tsl2522_data_##inst = {                                         \
-		.time_per_sample_us =                                                              \
-			(1U + DT_INST_ENUM_IDX(inst, time_per_sample_us)) * SAMPLE_TIME_STEP_US,   \
+		.time_per_sample_us = (1U + DT_INST_ENUM_IDX(inst, time_per_sample_us)) *          \
+				      TSL2522_SAMPLE_TIME_STEP_US,                                 \
 		.number_of_samples = (uint16_t)DT_INST_PROP(inst, number_of_samples),              \
 	};                                                                                         \
                                                                                                    \

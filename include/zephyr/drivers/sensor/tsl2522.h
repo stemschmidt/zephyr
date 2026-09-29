@@ -9,6 +9,9 @@
  *
  * This exposes attributes for the TSL2522 which can be used for
  * setting the on-chip gain and integration time parameters.
+ *
+ * For SENSOR_CHAN_IR the driver returns a normalized counts per ms at 1x gain, not lux.
+ *
  */
 
 #ifndef ZEPHYR_INCLUDE_DRIVERS_SENSOR_TSL2522_H_

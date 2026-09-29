@@ -10,26 +10,27 @@
 #include <zephyr/sys/util_macro.h>
 #include <zephyr/drivers/sensor/tsl2522.h>
 
-#define NUMBER_OF_SAMPLES_MIN 1U
-#define NUMBER_OF_SAMPLES_MAX 128U
-#define US_IN_MS              1000U
-
-#define TSL2522_MAX_INIT_RETRY    5U
-#define TSL2522_DEVICE_ID         0x5C
-#define TSL2522_RETRY_ACCESS_US   100U
-#define TSL2522_SOFTRESET_WAIT_US 500U
-#define TSL2522_SCALE             100000000LL
+#define TSL2522_NUMBER_OF_SAMPLES_MIN 1U
+#define TSL2522_NUMBER_OF_SAMPLES_MAX 128U
+#define TSL2522_US_IN_MS              1000U
+#define TSL2522_MAX_ATTENUATION       500000U
+#define TSL2522_MAX_INIT_RETRY        5U
+#define TSL2522_DEVICE_ID             0x5C
+#define TSL2522_RETRY_ACCESS_US       100U
+#define TSL2522_SOFTRESET_WAIT_US     500U
+#define TSL2522_SCALE                 100000000LL
 /* Low segment */
-#define TSL2522_L_A               1504118LL
-#define TSL2522_L_B               (-381917LL)
+#define TSL2522_L_A                   1504118LL
+#define TSL2522_L_B                   (-381917LL)
 /* High segment */
-#define TSL2522_H_A               1488034LL
-#define TSL2522_H_B               (-276429LL)
+#define TSL2522_H_A                   1488034LL
+#define TSL2522_H_B                   (-276429LL)
 
-#define TSL2522_REG_ENABLE  0x80
-#define TSL2522_ENABLE_FDEN BIT(6)
-#define TSL2522_ENABLE_AEN  BIT(1)
-#define TSL2522_ENABLE_PON  BIT(0)
+#define TSL2522_REG_ENABLE     0x80
+#define TSL2522_ENABLE_DISABLE 0U
+#define TSL2522_ENABLE_FDEN    BIT(6)
+#define TSL2522_ENABLE_AEN     BIT(1)
+#define TSL2522_ENABLE_PON     BIT(0)
 
 #define TSL2522_REG_MEAS_MODE                        0x81
 #define TSL2522_MEAS_MODE_STOP_AFTER_NTH_ITERATION   BIT(7)
@@ -133,18 +134,18 @@
 #define TSL2522_MOD_SEL_MOD_0   1U
 #define TSL2522_MOD_SEL_MOD_1   2U
 
-#define SAMPLE_TIME_STEP_US 100U
+#define TSL2522_SAMPLE_TIME_STEP_US 100U
 
 static inline uint16_t
 tsl2522_convert_sample_time_enum_to_us(enum us_per_sample_tsl2522 time_per_sample_enum)
 {
-	return (time_per_sample_enum + 1U) * SAMPLE_TIME_STEP_US;
+	return (time_per_sample_enum + 1U) * TSL2522_SAMPLE_TIME_STEP_US;
 }
 
 static inline enum us_per_sample_tsl2522
 tsl2522_convert_sample_time_us_to_enum(uint16_t time_per_sample_us)
 {
-	return (time_per_sample_us / SAMPLE_TIME_STEP_US) - 1U;
+	return (time_per_sample_us / TSL2522_SAMPLE_TIME_STEP_US) - 1U;
 }
 
 static inline uint16_t tsl2522_convert_us_to_counts(uint16_t us)
@@ -161,41 +162,6 @@ static inline uint32_t tsl2522_convert_gain_enum_to_value(enum sensor_gain_tsl25
 		return 500U;
 	}
 	return 1U;
-}
-
-static inline enum sensor_gain_tsl2522 convert_gain_value_to_enum(uint32_t gain)
-{
-	switch (gain) {
-	case 1000U:
-		return TSL2522_GAIN_MOD_1X;
-	case 2000U:
-		return TSL2522_GAIN_MOD_2X;
-	case 4000U:
-		return TSL2522_GAIN_MOD_4X;
-	case 8000U:
-		return TSL2522_GAIN_MOD_8X;
-	case 16000U:
-		return TSL2522_GAIN_MOD_16X;
-	case 32000U:
-		return TSL2522_GAIN_MOD_32X;
-	case 64000U:
-		return TSL2522_GAIN_MOD_64X;
-	case 128000U:
-		return TSL2522_GAIN_MOD_128X;
-	case 256000U:
-		return TSL2522_GAIN_MOD_256X;
-	case 512000U:
-		return TSL2522_GAIN_MOD_512X;
-	case 1024000U:
-		return TSL2522_GAIN_MOD_1024X;
-	case 2048000U:
-		return TSL2522_GAIN_MOD_2048X;
-	case 4096000U:
-		return TSL2522_GAIN_MOD_4096X;
-	case 500U:
-	default:
-		return TSL2522_GAIN_MOD_HALF;
-	}
 }
 
 struct tsl2522_dts_config {
@@ -215,10 +181,11 @@ struct tsl2522_measurement {
 
 struct tsl2522_data {
 	struct k_mutex mutex;
+	bool enable_mode;
 	struct tsl2522_measurement measurement;
 	uint16_t time_per_sample_us;
 	uint16_t number_of_samples;
-	uint32_t gain; /* gain value * 1000U for calculations. */
+	enum sensor_gain_tsl2522 gain;
 	uint8_t als_scale;
 };
 
