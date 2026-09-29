@@ -23,10 +23,14 @@
 extern "C" {
 #endif
 
+#define TSL2522_NUMBER_OF_SAMPLES_MIN 1U
+#define TSL2522_NUMBER_OF_SAMPLES_MAX 128U
+
 enum sensor_attribute_tsl2522 {
-	/* Time per sample (in us) */
-	SENSOR_ATTR_TIME_PER_SAMPLE_US = SENSOR_ATTR_PRIV_START + 1,
-	/* Number of samples in a conversion */
+	/* Time per sample. val1 contains an enum us_per_sample_tsl2522. */
+	SENSOR_ATTR_TIME_PER_SAMPLE = SENSOR_ATTR_PRIV_START + 1,
+	/* Number of samples in a conversion. val1 contains value between
+	 * TSL2522_NUMBER_OF_SAMPLES_MIN and TSL2522_NUMBER_OF_SAMPLES_MAX*/
 	SENSOR_ATTR_NUMBER_OF_SAMPLES,
 };
 

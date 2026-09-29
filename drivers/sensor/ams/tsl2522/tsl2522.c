@@ -59,6 +59,33 @@ static int tsl2522_calc_lux(const struct tsl2522_dts_config *cfg,
 	return 0;
 }
 
+/*
+ * IR channel: returnes normalized count rate in counts / (ms * gain), corrected by the glass
+ * attenuation. Not a photometric unit, the value is only proportional to the IR irradiance.
+ *
+ * Overflow check (raw <= 65535 << 4, att <= 5e6, atime_us * gain <= 5.24e11):
+ *   num          <= 1.05e6 * 5e6 * 10 = 5.2e13         (uint64_t: ok)
+ *   rem * 1e6    <  5.24e11 * 1e6     = 5.2e17         (uint64_t: ok)
+ *   quotient     <= 5.2e13 / 5e4      = 1e9            (int32_t:  ok)
+ */
+static int tsl2522_calc_ir(const struct tsl2522_dts_config *cfg,
+			   const struct tsl2522_measurement *m, struct sensor_value *val)
+{
+	uint64_t den = (uint64_t)m->atime_us * m->gain;
+	uint64_t num;
+
+	if (den == 0U) {
+		return -ENODATA;
+	}
+
+	num = (uint64_t)m->ir_channel * cfg->glass_ir_attenuation * 10U;
+
+	val->val1 = (int32_t)(num / den);
+	val->val2 = (int32_t)(((num % den) * 1000000ULL) / den);
+
+	return 0;
+}
+
 static void log_state(const uint8_t *status2_5)
 {
 	LOG_DBG("status2 (0x%02x): als data valid %d, dig sat %d, flicker det sat %d, mod sat1 %d, "
@@ -205,33 +232,6 @@ static int tsl2522_sample_fetch(const struct device *dev, enum sensor_channel ch
 	return rc;
 }
 
-/*
- * IR channel: normalized count rate in counts / (ms * gain), corrected by the glass
- * attenuation. Not a photometric unit, the value is only proportional to the IR irradiance.
- *
- * Overflow check (raw <= 65535 << 4, att <= 5e6, atime_us * gain <= 5.24e11):
- *   num          <= 1.05e6 * 5e6 * 10 = 5.2e13         (uint64_t: ok)
- *   rem * 1e6    <  5.24e11 * 1e6     = 5.2e17         (uint64_t: ok)
- *   quotient     <= 5.2e13 / 5e4      = 1e9            (int32_t:  ok)
- */
-static int tsl2522_calc_ir(const struct tsl2522_dts_config *cfg,
-			   const struct tsl2522_measurement *m, struct sensor_value *val)
-{
-	uint64_t den = (uint64_t)m->atime_us * m->gain;
-	uint64_t num;
-
-	if (den == 0U) {
-		return -ENODATA;
-	}
-
-	num = (uint64_t)m->ir_channel * cfg->glass_ir_attenuation * 10U;
-
-	val->val1 = (int32_t)(num / den);
-	val->val2 = (int32_t)(((num % den) * 1000000ULL) / den);
-
-	return 0;
-}
-
 static int tsl2522_channel_get(const struct device *dev, enum sensor_channel chan,
 			       struct sensor_value *val)
 {
@@ -307,7 +307,7 @@ static int disable_ambient_light_sensing(const struct device *dev)
 	const struct tsl2522_dts_config *cfg = dev->config;
 
 	/* Disable ALS and device. */
-	return i2c_reg_write_byte_dt(&cfg->i2c, TSL2522_REG_ENABLE, 0U);
+	return i2c_reg_write_byte_dt(&cfg->i2c, TSL2522_REG_ENABLE, TSL2522_ENABLE_DISABLE);
 }
 
 static int tsl2522_attribute_get(const struct device *dev, enum sensor_channel chan,
@@ -327,7 +327,7 @@ static int tsl2522_attribute_get(const struct device *dev, enum sensor_channel c
 		val->val2 = 0;
 	} else {
 		switch ((enum sensor_attribute_tsl2522)attr) {
-		case SENSOR_ATTR_TIME_PER_SAMPLE_US:
+		case SENSOR_ATTR_TIME_PER_SAMPLE:
 			val->val1 =
 				tsl2522_convert_sample_time_us_to_enum(data->time_per_sample_us);
 			val->val2 = 0;
@@ -381,7 +381,7 @@ static int tsl2522_attribute_set(const struct device *dev, enum sensor_channel c
 		}
 	} else {
 		switch ((enum sensor_attribute_tsl2522)attr) {
-		case SENSOR_ATTR_TIME_PER_SAMPLE_US:
+		case SENSOR_ATTR_TIME_PER_SAMPLE:
 			if (IN_RANGE(val->val1, TSL2522_100US_PER_SAMPLE,
 				     TSL2522_1000US_PER_SAMPLE)) {
 				enum us_per_sample_tsl2522 time_per_sample_us_enum =
@@ -437,6 +437,7 @@ static int tsl2522_attribute_set(const struct device *dev, enum sensor_channel c
 
 	if (enable_sensing) {
 		int rc2 = enable_ambient_light_sensing(dev);
+
 		if (rc == 0) {
 			rc = rc2;
 		}

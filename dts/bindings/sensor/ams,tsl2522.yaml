@@ -61,23 +61,21 @@ properties:
   glass-attenuation:
     type: int
     default: 100000
-    min: 50000
-    max: 150000
+    min: 0
+    max: 5000000
     description: |
       Visible light attenuation.
       Integer value for a representation with 5 decimal points.
       This default value (1.00000) is chosen for free open space (no glass).
-      Limit to +/- 50%
       Example: 1.2 would be 120000
 
   glass-ir-attenuation:
     type: int
     default: 100000
-    min: 50000
-    max: 150000
+    min: 0
+    max: 5000000
     description: |
       Infra-red light attenuation.
       Integer value for a representation with 5 decimal points.
       This default value (1.00000) is chosen for free open space (no glass).
-      Limit to +/- 50%
       Example: 1.2 would be 120000

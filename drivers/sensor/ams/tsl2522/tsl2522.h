@@ -10,21 +10,18 @@
 #include <zephyr/sys/util_macro.h>
 #include <zephyr/drivers/sensor/tsl2522.h>
 
-#define TSL2522_NUMBER_OF_SAMPLES_MIN 1U
-#define TSL2522_NUMBER_OF_SAMPLES_MAX 128U
-#define TSL2522_US_IN_MS              1000U
-#define TSL2522_MAX_ATTENUATION       500000U
-#define TSL2522_MAX_INIT_RETRY        5U
-#define TSL2522_DEVICE_ID             0x5C
-#define TSL2522_RETRY_ACCESS_US       100U
-#define TSL2522_SOFTRESET_WAIT_US     500U
-#define TSL2522_SCALE                 100000000LL
+#define TSL2522_US_IN_MS          1000U
+#define TSL2522_MAX_INIT_RETRY    5U
+#define TSL2522_DEVICE_ID         0x5C
+#define TSL2522_RETRY_ACCESS_US   100U
+#define TSL2522_SOFTRESET_WAIT_US 500U
+#define TSL2522_SCALE             100000000LL
 /* Low segment */
-#define TSL2522_L_A                   1504118LL
-#define TSL2522_L_B                   (-381917LL)
+#define TSL2522_L_A               1504118LL
+#define TSL2522_L_B               (-381917LL)
 /* High segment */
-#define TSL2522_H_A                   1488034LL
-#define TSL2522_H_B                   (-276429LL)
+#define TSL2522_H_A               1488034LL
+#define TSL2522_H_B               (-276429LL)
 
 #define TSL2522_REG_ENABLE     0x80
 #define TSL2522_ENABLE_DISABLE 0U
@@ -161,7 +158,7 @@ static inline uint32_t tsl2522_convert_gain_enum_to_value(enum sensor_gain_tsl25
 	} else if (again == TSL2522_GAIN_MOD_HALF) {
 		return 500U;
 	}
-	return 1U;
+	return 0U; /* invalid register value, callers detect den == 0 */
 }
 
 struct tsl2522_dts_config {
@@ -181,7 +178,6 @@ struct tsl2522_measurement {
 
 struct tsl2522_data {
 	struct k_mutex mutex;
-	bool enable_mode;
 	struct tsl2522_measurement measurement;
 	uint16_t time_per_sample_us;
 	uint16_t number_of_samples;
