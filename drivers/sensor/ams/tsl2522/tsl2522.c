@@ -144,48 +144,40 @@ static int internal_sample_fetch(const struct device *dev)
 	log_state(status2_5);
 
 	if (als_data_valid && measured_data_valid) {
-		uint8_t als_status = 0U;
-		uint8_t als_status2 = 0U;
-		uint8_t als_data[4];
+		struct als_registers als_regs;
 
-		/* Fetch actual data. */
-		rc = i2c_reg_read_byte_dt(&cfg->i2c, TSL2522_REG_ALS_STATUS, &als_status);
-		if (rc < 0) {
-			goto exit;
-		}
+		BUILD_ASSERT(sizeof(als_regs) == 8);
 
-		rc = i2c_reg_read_byte_dt(&cfg->i2c, TSL2522_REG_ALS_STATUS2, &als_status2);
+		/* Fetch ALS data in one burst. */
+		rc = i2c_burst_read_dt(&cfg->i2c, TSL2522_REG_ALS_STATUS, (uint8_t *)&als_regs,
+				       sizeof(als_regs));
 		if (rc < 0) {
 			goto exit;
 		}
 
 		LOG_DBG("als_status (0x%02x): seq step %lu, ana_sat_dat0 %d, ana_sat_dat1 %d, "
 			"dat0_scaled %d, dat1_scaled %d",
-			als_status, FIELD_GET(TSL2522_ALS_STATUS_MEAS_SEQR_STEP, als_status),
-			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA0_ANA_SAT, als_status),
-			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA1_ANA_SAT, als_status),
-			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA0_SCALED, als_status),
-			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA1_SCALED, als_status));
+			als_regs.status,
+			FIELD_GET(TSL2522_ALS_STATUS_MEAS_SEQR_STEP, als_regs.status),
+			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA0_ANA_SAT, als_regs.status),
+			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA1_ANA_SAT, als_regs.status),
+			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA0_SCALED, als_regs.status),
+			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA1_SCALED, als_regs.status));
 
 		data->measurement.saturation =
-			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA0_ANA_SAT, als_status) ||
-			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA1_ANA_SAT, als_status) ||
+			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA0_ANA_SAT, als_regs.status) ||
+			(bool)FIELD_GET(TSL2522_ALS_STATUS_DATA1_ANA_SAT, als_regs.status) ||
 			(bool)FIELD_GET(TSL2522_STATUS2_ALS_DIG_SAT, status2_5[0]) ||
 			(bool)FIELD_GET(TSL2522_STATUS2_MOD_ANA_SAT1, status2_5[0]) ||
 			(bool)FIELD_GET(TSL2522_STATUS2_MOD_ANA_SAT0, status2_5[0]);
 
-		rc = i2c_burst_read_dt(&cfg->i2c, TSL2522_REG_ALS_DATA, als_data, sizeof(als_data));
-		if (rc < 0) {
-			goto exit;
-		}
-
-		data->measurement.photopic_channel = (uint32_t)sys_get_le16(&als_data[0]);
-		if (!FIELD_GET(TSL2522_ALS_STATUS_DATA0_SCALED, als_status)) {
+		data->measurement.photopic_channel = (uint32_t)sys_get_le16(als_regs.data0);
+		if (!FIELD_GET(TSL2522_ALS_STATUS_DATA0_SCALED, als_regs.status)) {
 			data->measurement.photopic_channel = data->measurement.photopic_channel
 							     << data->als_scale;
 		}
-		data->measurement.ir_channel = (uint32_t)sys_get_le16(&als_data[2]);
-		if (!FIELD_GET(TSL2522_ALS_STATUS_DATA1_SCALED, als_status)) {
+		data->measurement.ir_channel = (uint32_t)sys_get_le16(als_regs.data1);
+		if (!FIELD_GET(TSL2522_ALS_STATUS_DATA1_SCALED, als_regs.status)) {
 			data->measurement.ir_channel = data->measurement.ir_channel
 						       << data->als_scale;
 		}
@@ -193,7 +185,7 @@ static int internal_sample_fetch(const struct device *dev)
 		data->measurement.atime_us = data->number_of_samples * data->time_per_sample_us;
 		/* Take the gain for the converted data from the device. */
 		data->measurement.gain = tsl2522_convert_gain_enum_to_value(
-			FIELD_GET(TSL2522_ALS_STATUS2_DATA0_GAIN, als_status2));
+			FIELD_GET(TSL2522_ALS_STATUS2_DATA0_GAIN, als_regs.status2));
 	} else {
 		if (!als_data_valid) {
 			LOG_DBG("als data not yet available!");

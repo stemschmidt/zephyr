@@ -161,6 +161,14 @@ static inline uint32_t tsl2522_convert_gain_enum_to_value(enum sensor_gain_tsl25
 	return 0U; /* invalid register value, callers detect den == 0 */
 }
 
+struct als_registers {
+	uint8_t status;
+	uint8_t data0[2];
+	uint8_t data1[2];
+	uint8_t reserved[2];
+	uint8_t status2;
+};
+
 struct tsl2522_dts_config {
 	struct i2c_dt_spec i2c;
 	uint32_t glass_attenuation;
