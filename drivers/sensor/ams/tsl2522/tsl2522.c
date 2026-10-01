@@ -182,7 +182,8 @@ static int internal_sample_fetch(const struct device *dev)
 						       << data->als_scale;
 		}
 
-		data->measurement.atime_us = data->number_of_samples * data->time_per_sample_us;
+		data->measurement.atime_us = tsl2522_get_us_from_time_steps(
+			data->number_of_samples, data->measurement_time_steps);
 		/* Take the gain for the converted data from the device. */
 		data->measurement.gain = tsl2522_convert_gain_enum_to_value(
 			FIELD_GET(TSL2522_ALS_STATUS2_DATA0_GAIN, als_regs.status2));
@@ -264,15 +265,14 @@ static int set_modulator_gain(const struct device *dev, enum sensor_gain_tsl2522
 					     FIELD_PREP(TSL2522_MEAS_SEQR_STEP0_MOD_GAIN0, gain));
 }
 
-static int set_time_per_sample_us(const struct device *dev, uint16_t time_per_sample_us)
+static int set_measurement_time_ticks(const struct device *dev, uint16_t measurement_time_steps)
 {
 	const struct tsl2522_dts_config *cfg = dev->config;
-	uint8_t sample_time[2];
-	uint16_t counts = tsl2522_convert_us_to_counts(time_per_sample_us);
+	uint8_t sample_time_ticks[2];
 
-	sys_put_le16(counts, sample_time);
-	return i2c_burst_write_dt(&cfg->i2c, TSL2522_REG_SAMPLE_TIME0, sample_time,
-				  sizeof(sample_time));
+	sys_put_le16(measurement_time_steps - 1U, sample_time_ticks);
+	return i2c_burst_write_dt(&cfg->i2c, TSL2522_REG_SAMPLE_TIME0, sample_time_ticks,
+				  sizeof(sample_time_ticks));
 }
 
 static int set_number_of_samples(const struct device *dev, uint16_t number_of_samples)
@@ -319,9 +319,8 @@ static int tsl2522_attribute_get(const struct device *dev, enum sensor_channel c
 		val->val2 = 0;
 	} else {
 		switch ((enum sensor_attribute_tsl2522)attr) {
-		case SENSOR_ATTR_TIME_PER_SAMPLE:
-			val->val1 =
-				tsl2522_convert_sample_time_us_to_enum(data->time_per_sample_us);
+		case SENSOR_ATTR_MEASUREMENT_TIME_STEPS:
+			val->val1 = data->measurement_time_steps;
 			val->val2 = 0;
 			break;
 		case SENSOR_ATTR_NUMBER_OF_SAMPLES:
@@ -373,27 +372,23 @@ static int tsl2522_attribute_set(const struct device *dev, enum sensor_channel c
 		}
 	} else {
 		switch ((enum sensor_attribute_tsl2522)attr) {
-		case SENSOR_ATTR_TIME_PER_SAMPLE:
-			if (IN_RANGE(val->val1, TSL2522_100US_PER_SAMPLE,
-				     TSL2522_1000US_PER_SAMPLE)) {
-				enum us_per_sample_tsl2522 time_per_sample_us_enum =
-					(enum us_per_sample_tsl2522)val->val1;
+		case SENSOR_ATTR_MEASUREMENT_TIME_STEPS:
+			if (IN_RANGE(val->val1, TSL2522_MEASUREMENT_TIME_STEPS_MIN,
+				     TSL2522_MEASUREMENT_TIME_STEPS_MAX)) {
+				uint16_t measurement_time_steps = (uint16_t)val->val1;
 
-				/* Convert it from enum to actual us. */
-				uint16_t time_per_sample_us =
-					tsl2522_convert_sample_time_enum_to_us(
-						time_per_sample_us_enum);
-
-				if (time_per_sample_us != data->time_per_sample_us) {
+				if (measurement_time_steps != data->measurement_time_steps) {
 					rc = disable_ambient_light_sensing(dev);
 					if (rc < 0) {
 						k_mutex_unlock(&data->mutex);
 						return rc;
 					}
 					enable_sensing = true;
-					rc = set_time_per_sample_us(dev, time_per_sample_us);
+					rc = set_measurement_time_ticks(dev,
+									measurement_time_steps);
 					if (rc == 0) {
-						data->time_per_sample_us = time_per_sample_us;
+						data->measurement_time_steps =
+							measurement_time_steps;
 					}
 				}
 			} else {
@@ -479,7 +474,7 @@ static int setup_device(const struct device *dev)
 
 	data->als_scale = FIELD_GET(TSL2522_MEAS_MODE_ALS_SCALE, measure_mode);
 
-	rc = set_time_per_sample_us(dev, data->time_per_sample_us);
+	rc = set_measurement_time_ticks(dev, data->measurement_time_steps);
 	if (rc < 0) {
 		return rc;
 	}
@@ -586,8 +581,7 @@ static int tsl2522_init(const struct device *dev)
 	};                                                                                         \
                                                                                                    \
 	static struct tsl2522_data tsl2522_data_##inst = {                                         \
-		.time_per_sample_us = (1U + DT_INST_ENUM_IDX(inst, time_per_sample_us)) *          \
-				      TSL2522_SAMPLE_TIME_STEP_US,                                 \
+		.measurement_time_steps = (uint16_t)DT_INST_PROP(inst, measurement_time_steps),    \
 		.number_of_samples = (uint16_t)DT_INST_PROP(inst, number_of_samples),              \
 	};                                                                                         \
                                                                                                    \

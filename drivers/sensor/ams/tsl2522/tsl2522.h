@@ -133,22 +133,11 @@
 
 #define TSL2522_SAMPLE_TIME_STEP_US 100U
 
-static inline uint16_t
-tsl2522_convert_sample_time_enum_to_us(enum us_per_sample_tsl2522 time_per_sample_enum)
+static inline uint16_t tsl2522_get_us_from_time_steps(uint16_t number_of_samples,
+						      uint16_t measurement_time_steps)
 {
-	return (time_per_sample_enum + 1U) * TSL2522_SAMPLE_TIME_STEP_US;
-}
-
-static inline enum us_per_sample_tsl2522
-tsl2522_convert_sample_time_us_to_enum(uint16_t time_per_sample_us)
-{
-	return (time_per_sample_us / TSL2522_SAMPLE_TIME_STEP_US) - 1U;
-}
-
-static inline uint16_t tsl2522_convert_us_to_counts(uint16_t us)
-{
-	/* Time step is 1.388889μs, so 72 time step (count) per 100 µs. */
-	return (uint16_t)(((uint32_t)us * 72U / 100U) - 1U);
+	return (uint16_t)(((uint64_t)measurement_time_steps * 1388889U * number_of_samples) /
+			  1000000U);
 }
 
 static inline uint32_t tsl2522_convert_gain_enum_to_value(enum sensor_gain_tsl2522 again)
@@ -187,7 +176,7 @@ struct tsl2522_measurement {
 struct tsl2522_data {
 	struct k_mutex mutex;
 	struct tsl2522_measurement measurement;
-	uint16_t time_per_sample_us;
+	uint16_t measurement_time_steps;
 	uint16_t number_of_samples;
 	enum sensor_gain_tsl2522 gain;
 	uint8_t als_scale;

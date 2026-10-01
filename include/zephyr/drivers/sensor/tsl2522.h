@@ -23,14 +23,18 @@
 extern "C" {
 #endif
 
-#define TSL2522_NUMBER_OF_SAMPLES_MIN 1U
-#define TSL2522_NUMBER_OF_SAMPLES_MAX 128U
+#define TSL2522_NUMBER_OF_SAMPLES_MIN      1U
+#define TSL2522_NUMBER_OF_SAMPLES_MAX      2047U
+#define TSL2522_MEASUREMENT_TIME_STEPS_MIN 1U
+#define TSL2522_MEASUREMENT_TIME_STEPS_MAX 2047U
 
 enum sensor_attribute_tsl2522 {
-	/* Time per sample. val1 contains an enum us_per_sample_tsl2522. */
-	SENSOR_ATTR_TIME_PER_SAMPLE = SENSOR_ATTR_PRIV_START + 1,
-	/* Number of samples in a conversion. val1 contains value between
-	 * TSL2522_NUMBER_OF_SAMPLES_MIN and TSL2522_NUMBER_OF_SAMPLES_MAX*/
+	/* ALS measurement time step. val1 contains the time in steps of 1.388889μs modulator clock.
+	 */
+	SENSOR_ATTR_MEASUREMENT_TIME_STEPS = SENSOR_ATTR_PRIV_START + 1,
+	/* Number of samples in a conversion. val1 contains a value between
+	 * TSL2522_NUMBER_OF_SAMPLES_MIN and TSL2522_NUMBER_OF_SAMPLES_MAX
+	 */
 	SENSOR_ATTR_NUMBER_OF_SAMPLES,
 };
 
@@ -49,19 +53,6 @@ enum sensor_gain_tsl2522 {
 	TSL2522_GAIN_MOD_1024X,     /**< Gain x 1024.0 */
 	TSL2522_GAIN_MOD_2048X,     /**< Gain x 2048.0 */
 	TSL2522_GAIN_MOD_4096X      /**< Gain x 4096.0 */
-};
-
-enum us_per_sample_tsl2522 {
-	TSL2522_100US_PER_SAMPLE, /**< 100µs per Sample */
-	TSL2522_200US_PER_SAMPLE, /**< 200µs per Sample */
-	TSL2522_300US_PER_SAMPLE, /**< 300µs per Sample */
-	TSL2522_400US_PER_SAMPLE, /**< 400µs per Sample */
-	TSL2522_500US_PER_SAMPLE, /**< 500µs per Sample */
-	TSL2522_600US_PER_SAMPLE, /**< 600µs per Sample */
-	TSL2522_700US_PER_SAMPLE, /**< 700µs per Sample */
-	TSL2522_800US_PER_SAMPLE, /**< 800µs per Sample */
-	TSL2522_900US_PER_SAMPLE, /**< 900µs per Sample */
-	TSL2522_1000US_PER_SAMPLE /**< 1000µs per Sample */
 };
 
 #ifdef __cplusplus
