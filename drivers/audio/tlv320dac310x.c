@@ -7,6 +7,7 @@
 #define DT_DRV_COMPAT ti_tlv320dac
 
 #include <errno.h>
+#include <math.h>
 
 #include <zephyr/sys/util.h>
 
@@ -309,8 +310,90 @@ static int codec_configure_dai(const struct device *dev, audio_dai_cfg_t *cfg)
 	return 0;
 }
 
-static int codec_configure_clocks(const struct device *dev,
-				  struct audio_codec_cfg *cfg)
+struct pll_config {
+	uint8_t p;
+	uint8_t r;
+	uint8_t j;
+	uint16_t d;
+};
+
+static bool configure_pll(const struct device *dev, const struct pll_config *pll)
+{
+	// Validate all input ranges
+	if (pll->p < 1 || pll->p > 8) {
+		return false;
+	}
+	if (pll->r < 1 || pll->r > 16) {
+		return false;
+	}
+	if (pll->j < 1 || pll->j > 63) {
+		return false;
+	}
+	if (pll->d > 9999) {
+		return false;
+	}
+
+	codec_write_reg(dev, PLL_P_R_ADDR, PLL_P_DIV(pll->p) | PLL_R_MUL(pll->r));
+	codec_write_reg(dev, PLL_J_ADDR, PLL_J(pll->j));
+	codec_write_reg(dev, PLL_D_MSB_ADDR, PLL_D_MSB(pll->d));
+	codec_write_reg(dev, PLL_D_LSB_ADDR, PLL_D_LSB(pll->d));
+
+	return true;
+}
+
+static bool get_pll_config(uint32_t mclk_freq, uint32_t desired_freq, float max_error,
+			   struct pll_config *pll)
+{
+	float ratio = (float)desired_freq / mclk_freq;
+	float best_error = 1.0; // 100% error to start
+	pll->p = 1;
+	pll->r = 1;
+	pll->j = 0;
+	pll->d = 0;
+
+	// Try different P & R values
+	for (uint8_t P = 1; P <= 8; P++) {
+		for (uint8_t R = 1; R <= 16; R++) {
+			float J_float = ratio * P * R;
+			if (J_float > 63) {
+				continue;
+			}
+
+			uint8_t J = (uint8_t)J_float;
+			uint16_t D = (uint16_t)((J_float - J) * 2048);
+			if (D > 2047) {
+				continue;
+			}
+
+			// Calculate actual frequency ratio this would give
+			float actual_ratio = (float)(J + (float)D / 2048.0) / (P * R);
+			float error = fabs(actual_ratio - ratio) / ratio;
+
+			// If this is better than our best so far, save it
+			if (error < best_error) {
+				best_error = error;
+				pll->p = P;
+				pll->r = R;
+				pll->j = J;
+				pll->d = D;
+
+				// If we're within acceptable error, use these values
+				if (error <= max_error) {
+					return true;
+				}
+			}
+		}
+	}
+
+	// If we got here, use the best values we found
+	if (best_error < 0.1) { // Accept up to 10% error rather than totally fail
+		return true;
+	}
+
+	return false; // No acceptable values found
+}
+
+static int codec_configure_clocks(const struct device *dev, struct audio_codec_cfg *cfg)
 {
 	int dac_clk, mod_clk;
 	struct i2s_config *i2s;
@@ -319,8 +402,23 @@ static int codec_configure_clocks(const struct device *dev,
 	int mdac, ndac, bclk_div, mclk_div;
 
 	i2s = &cfg->dai_cfg.i2s;
-	LOG_DBG("MCLK %u Hz PCM Rate: %u Hz", cfg->mclk_freq,
-			i2s->frame_clk_freq);
+	LOG_DBG("MCLK %u Hz PCM Rate: %u Hz", cfg->mclk_freq, i2s->frame_clk_freq);
+	struct pll_config pll = {0};
+	bool pll_success = get_pll_config(i2s->channels * i2s->frame_clk_freq * i2s->word_size,
+					  cfg->mclk_freq, 0.01, &pll);
+
+	if (pll_success) {
+		uint8_t pll_p_r = 0;
+		codec_write_reg(dev, CLOCK_GEN_MUX_ADDR,
+				CLOCK_PLL_CLKIN_BCLK | CLICK_CODEC_CLKIN_PLL_CLK);
+
+		configure_pll(dev, &pll);
+
+		/* Power PLL */
+		codec_read_reg(dev, PLL_P_R_ADDR, &pll_p_r);
+		pll_p_r |= PLL_POWER_UP;
+		codec_write_reg(dev, PLL_P_R_ADDR, pll_p_r);
+	}
 
 	if (cfg->mclk_freq <= DAC_PROC_CLK_FREQ_MAX) {
 		/* use MCLK frequency as the DAC processing clock */
