@@ -182,8 +182,20 @@ extern "C" {
 #define TIMER_MCLK_DIV_VAL(val)	((val) & TIMER_MCLK_DIV_MASK)
 
 struct reg_addr {
-	uint8_t page;		/* page number */
-	uint8_t reg_addr;	/* register address */
+	uint8_t page;     /* page number */
+	uint8_t reg_addr; /* register address */
+};
+
+struct tlv320dac310x_config {
+	const struct i2c_dt_spec bus;
+	const struct gpio_dt_spec reset_gpio;
+	const uint8_t speaker_gain;
+	const bool use_volume_control_pin;
+	const bool use_internal_pll;
+};
+
+struct tlv320dac310x_data {
+	struct reg_addr reg_addr_cache;
 };
 
 enum proc_block {

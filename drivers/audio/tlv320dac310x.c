@@ -24,23 +24,6 @@ LOG_MODULE_REGISTER(tlv320dac310x);
 #define CODEC_OUTPUT_VOLUME_MAX		0
 #define CODEC_OUTPUT_VOLUME_MIN		(-78 * 2)
 
-struct codec_driver_config {
-	struct i2c_dt_spec bus;
-	struct gpio_dt_spec reset_gpio;
-	uint8_t speaker_gain;
-};
-
-struct codec_driver_data {
-	struct reg_addr	reg_addr_cache;
-};
-
-static struct codec_driver_config codec_device_config = {
-	.bus		= I2C_DT_SPEC_INST_GET(0),
-	.reset_gpio	= GPIO_DT_SPEC_INST_GET(0, reset_gpios),
-	.speaker_gain	= DT_INST_PROP(0, speaker_gain),
-};
-
-static struct codec_driver_data codec_device_data;
 
 static void codec_write_reg(const struct device *dev, struct reg_addr reg,
 			    uint8_t val);
@@ -65,7 +48,7 @@ static void codec_read_all_regs(const struct device *dev);
 
 static int codec_initialize(const struct device *dev)
 {
-	const struct codec_driver_config *const dev_cfg = dev->config;
+	const struct tlv320dac310x_config *const dev_cfg = dev->config;
 
 	if (!device_is_ready(dev_cfg->bus.bus)) {
 		LOG_ERR("I2C device not ready");
@@ -83,7 +66,7 @@ static int codec_initialize(const struct device *dev)
 static int codec_configure(const struct device *dev,
 			   struct audio_codec_cfg *cfg)
 {
-	const struct codec_driver_config *const dev_cfg = dev->config;
+	const struct tlv320dac310x_config *const dev_cfg = dev->config;
 	int ret;
 
 	if (cfg->dai_type != AUDIO_DAI_TYPE_I2S) {
@@ -236,8 +219,8 @@ static int codec_apply_properties(const struct device *dev)
 static void codec_write_reg(const struct device *dev, struct reg_addr reg,
 			    uint8_t val)
 {
-	struct codec_driver_data *const dev_data = dev->data;
-	const struct codec_driver_config *const dev_cfg = dev->config;
+	struct tlv320dac310x_data *const dev_data = dev->data;
+	const struct tlv320dac310x_config *const dev_cfg = dev->config;
 
 	/* set page if different */
 	if (dev_data->reg_addr_cache.page != reg.page) {
@@ -253,8 +236,8 @@ static void codec_write_reg(const struct device *dev, struct reg_addr reg,
 static void codec_read_reg(const struct device *dev, struct reg_addr reg,
 			   uint8_t *val)
 {
-	struct codec_driver_data *const dev_data = dev->data;
-	const struct codec_driver_config *const dev_cfg = dev->config;
+	struct tlv320dac310x_data *const dev_data = dev->data;
+	const struct tlv320dac310x_config *const dev_cfg = dev->config;
 
 	/* set page if different */
 	if (dev_data->reg_addr_cache.page != reg.page) {
@@ -317,7 +300,7 @@ struct pll_config {
 	uint16_t d;
 };
 
-static bool configure_pll(const struct device *dev, const struct pll_config *pll)
+static bool codec_configure_pll(const struct device *dev, const struct pll_config *pll)
 {
 	// Validate all input ranges
 	if (pll->p < 1 || pll->p > 8) {
@@ -341,8 +324,8 @@ static bool configure_pll(const struct device *dev, const struct pll_config *pll
 	return true;
 }
 
-static bool get_pll_config(uint32_t mclk_freq, uint32_t desired_freq, float max_error,
-			   struct pll_config *pll)
+static bool codec_get_pll_config(uint32_t mclk_freq, uint32_t desired_freq, float max_error,
+				 struct pll_config *pll)
 {
 	float ratio = (float)desired_freq / mclk_freq;
 	float best_error = 1.0; // 100% error to start
@@ -395,6 +378,7 @@ static bool get_pll_config(uint32_t mclk_freq, uint32_t desired_freq, float max_
 
 static int codec_configure_clocks(const struct device *dev, struct audio_codec_cfg *cfg)
 {
+	const struct tlv320dac310x_config *const dev_cfg = dev->config;
 	int dac_clk, mod_clk;
 	struct i2s_config *i2s;
 	int osr, osr_min, osr_max;
@@ -403,21 +387,25 @@ static int codec_configure_clocks(const struct device *dev, struct audio_codec_c
 
 	i2s = &cfg->dai_cfg.i2s;
 	LOG_DBG("MCLK %u Hz PCM Rate: %u Hz", cfg->mclk_freq, i2s->frame_clk_freq);
-	struct pll_config pll = {0};
-	bool pll_success = get_pll_config(i2s->channels * i2s->frame_clk_freq * i2s->word_size,
-					  cfg->mclk_freq, 0.01, &pll);
 
-	if (pll_success) {
-		uint8_t pll_p_r = 0;
-		codec_write_reg(dev, CLOCK_GEN_MUX_ADDR,
-				CLOCK_PLL_CLKIN_BCLK | CLICK_CODEC_CLKIN_PLL_CLK);
+	if (dev_cfg->use_internal_pll) {
+		struct pll_config pll = {0};
+		bool pll_success =
+			codec_get_pll_config(i2s->channels * i2s->frame_clk_freq * i2s->word_size,
+					     cfg->mclk_freq, 0.01, &pll);
 
-		configure_pll(dev, &pll);
+		if (pll_success) {
+			uint8_t pll_p_r = 0;
+			codec_write_reg(dev, CLOCK_GEN_MUX_ADDR,
+					CLOCK_PLL_CLKIN_BCLK | CLICK_CODEC_CLKIN_PLL_CLK);
 
-		/* Power PLL */
-		codec_read_reg(dev, PLL_P_R_ADDR, &pll_p_r);
-		pll_p_r |= PLL_POWER_UP;
-		codec_write_reg(dev, PLL_P_R_ADDR, pll_p_r);
+			codec_configure_pll(dev, &pll);
+
+			/* Power PLL */
+			codec_read_reg(dev, PLL_P_R_ADDR, &pll_p_r);
+			pll_p_r |= PLL_POWER_UP;
+			codec_write_reg(dev, PLL_P_R_ADDR, pll_p_r);
+		}
 	}
 
 	if (cfg->mclk_freq <= DAC_PROC_CLK_FREQ_MAX) {
@@ -548,7 +536,7 @@ static enum osr_multiple codec_get_osr_multiple(audio_dai_cfg_t *cfg)
 
 static void codec_configure_output(const struct device *dev)
 {
-	const struct codec_driver_config *const dev_cfg = dev->config;
+	const struct tlv320dac310x_config *const dev_cfg = dev->config;
 	uint8_t val;
 
 	/*
@@ -724,13 +712,26 @@ static void codec_read_all_regs(const struct device *dev)
 #endif
 
 static DEVICE_API(audio_codec, codec_driver_api) = {
-	.configure		= codec_configure,
-	.start_output		= codec_start_output,
-	.stop_output		= codec_stop_output,
-	.set_property		= codec_set_property,
-	.apply_properties	= codec_apply_properties,
+	.configure = codec_configure,
+	.start_output = codec_start_output,
+	.stop_output = codec_stop_output,
+	.set_property = codec_set_property,
+	.apply_properties = codec_apply_properties,
 };
 
-DEVICE_DT_INST_DEFINE(0, codec_initialize, NULL, &codec_device_data,
-		&codec_device_config, POST_KERNEL,
-		CONFIG_AUDIO_CODEC_INIT_PRIORITY, &codec_driver_api);
+#define TLV320DAC31X_DEFINE(inst)                                                                  \
+	static struct tlv320dac310x_data codec_device_data_##inst;                                 \
+                                                                                                   \
+	static struct tlv320dac310x_config codec_device_config_##inst = {                          \
+		.bus = I2C_DT_SPEC_INST_GET(inst),                                                 \
+		.reset_gpio = GPIO_DT_SPEC_INST_GET(inst, reset_gpios),                            \
+		.speaker_gain = DT_INST_PROP(inst, speaker_gain),                                  \
+		.use_volume_control_pin = (bool)DT_INST_PROP_OR(inst, use_volume_control_pin, 0),  \
+		.use_internal_pll = (bool)DT_INST_PROP_OR(inst, use_internal_pll, 0),              \
+	};                                                                                         \
+                                                                                                   \
+	DEVICE_DT_INST_DEFINE(0, codec_initialize, NULL, &codec_device_data_##inst,                \
+			      &codec_device_config_##inst, POST_KERNEL,                            \
+			      CONFIG_AUDIO_CODEC_INIT_PRIORITY, &codec_driver_api);
+
+DT_INST_FOREACH_STATUS_OKAY(TLV320DAC31X_DEFINE)
