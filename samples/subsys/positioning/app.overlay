@@ -1,0 +1,27 @@
+/*
+ * Copyright (c) 2026 Carl Zeiss Meditec AG
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ */
+
+/ {
+	zoom: zoom-motor {
+		compatible = "zephyr,dc_motor";
+		status = "okay";
+		pwms = <&flexpwm1_pwm0 0 PWM_KHZ(20) PWM_POLARITY_NORMAL>,
+			<&flexpwm1_pwm0 1 PWM_KHZ(20) PWM_POLARITY_NORMAL>;
+		pwm-names = "towards_max", "towards_min";
+		enable-gpios = <&gpio3 1 GPIO_ACTIVE_HIGH>;
+	};
+
+	aperture: apterture-motor {
+		compatible = "zephyr,dc_motor";
+		status = "okay";
+
+		pwms = <&flexpwm1_pwm1 0 PWM_KHZ(20) PWM_POLARITY_NORMAL>,
+			<&flexpwm1_pwm1 1 PWM_KHZ(20) PWM_POLARITY_NORMAL>;
+		pwm-names = "towards_max", "towards_min";
+		enable-gpios = <&gpio3 2 GPIO_ACTIVE_HIGH>;
+	};
+};

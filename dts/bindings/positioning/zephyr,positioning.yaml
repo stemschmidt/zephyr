@@ -1,0 +1,21 @@
+# Copyright (c) 2026 Carl Zeiss Meditec AG
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Positioning subsystem to be used by an application.
+
+compatible: "zephyr,positioning"
+
+properties:
+  motor-controller:
+    type: phandle
+    required: true
+    description: |
+      Node of a motor controller to use
+
+  position-sensor:
+    type: phandle
+    required: true
+    description: |
+      Node of a position sensor to use
+

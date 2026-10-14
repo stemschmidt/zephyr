@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Carl Zeiss Meditec AG
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  DC Motor.
+
+compatible: "zephyr,dc_motor"
+
+include: base.yaml
+
+properties:
+  pwms:
+    type: phandle-array
+    required: true
+    description: PWM channels used to drive the motor
+
+  pwm-names:
+    type: string-array
+    required: true
+    description: Names of the PWM channels
+
+  enable-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO for enable/disable

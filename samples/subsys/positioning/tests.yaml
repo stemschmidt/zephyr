@@ -1,0 +1,15 @@
+sample:
+  description: Demonstrate positioning system APIs
+  name: Positioning system
+common:
+  tags:
+    - positioning
+  harness: console
+  harness_config:
+    type: one_line
+    regex:
+      - ""
+tests:
+  sample.subsys.positioning_system:
+    platform_allow:
+    integration_platforms:

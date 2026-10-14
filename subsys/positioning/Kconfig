@@ -1,0 +1,40 @@
+# Copyright (c) 2026 Carl Zeiss Meditec AG
+# SPDX-License-Identifier: Apache-2.0
+
+config POSITIONING
+	bool "Positioning Subsystem"
+	default y
+	depends on DT_HAS_ZEPHYR_POSITIONING_ENABLED
+	select SENSOR
+	help
+	  Enable Positioning Subsystem.
+
+if POSITIONING
+
+module = POSITIONING
+module-str = positioning
+source "subsys/logging/Kconfig.template.log_config"
+
+config POSITIONING_INIT_PRIORITY
+	int "Positioning init priority"
+	default 90
+	help
+	  Positioning initialization priority.
+
+config POSITIONING_RUNTIME_THREAD_STACK_SIZE
+	int "stack size for positioning subsystem runtime thread"
+	depends on POSITIONING
+	default 4096
+	help
+	  This is the stack size for positioning subsystem runtime thread
+	  Typical values are 4096
+
+config POSITIONING_RUNTIME_THREAD_PRIORITY
+	int "priority for positioning subsystem runtime thread"
+	depends on POSITIONING
+	default 7
+	help
+	  This is the thread priority for positioning subsystem runtime thread
+	  Typical values are 9
+
+endif # POSITIONING

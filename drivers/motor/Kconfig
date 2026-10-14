@@ -1,0 +1,31 @@
+# Copyright (c) 2026 Carl Zeiss Meditec AG
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig MOTOR
+	bool "Motor drivers"
+	default y
+	depends on DT_HAS_ZEPHYR_DC_MOTOR_ENABLED
+	select PWM
+	help
+	  Enable config options for motor drivers.
+
+if MOTOR
+
+module = MOTOR
+module-str = motor_driver
+source "subsys/logging/Kconfig.template.log_config"
+
+config MOTOR_INIT_PRIORITY
+	int "Init priority"
+	default KERNEL_INIT_PRIORITY_DEVICE
+	help
+	  Motor driver initialization priority.
+
+config MOTOR_SHELL
+	bool "Motor shell"
+	select SHELL
+	select CBPRINTF_FP_SUPPORT
+	help
+	  Activate shell module to access configured motors.
+
+endif # MOTOR
