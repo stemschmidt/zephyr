@@ -1,0 +1,5 @@
+/ {
+    peripheral_interconnect: peripheral_interconnect {
+        
+    };
+};

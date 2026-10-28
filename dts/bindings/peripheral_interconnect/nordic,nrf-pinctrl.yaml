@@ -1,0 +1,10 @@
+# Copyright (c) 2026 The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+title: Nordic nRF DPPI
+
+description: |
+
+compatible: "nordic,nrf-dppi"
+
+include: peripheral-interconnect-device.yaml

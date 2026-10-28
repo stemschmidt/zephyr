@@ -1,0 +1,20 @@
+# PECI configuration options
+
+# Copyright (c) 2020 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig PERIPHERAL_INTERCONNECT
+	bool "Peripheral interconnect drivers"
+	help
+	  Include peripheral interconnect drivers in system config.
+
+if PERIPHERAL_INTERCONNECT
+
+# zephyr-keep-sorted-start
+# zephyr-keep-sorted-stop
+
+module = PERIPHERAL_INTERCONNECT
+module-str = peripheral_interconnect
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # PERIPHERAL_INTERCONNECT
